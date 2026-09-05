@@ -2,6 +2,7 @@ import os
 import sqlite3
 import random
 import logging
+import asyncio
 from datetime import datetime, timezone, timedelta
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -36,7 +37,12 @@ MIN_REFERRALS = 20
 
 BUY_STARS = "https://t.me/premyumstarstekin/933"
 
-logging.basicConfig(level=logging.INFO)
+USERS_PER_PAGE = 10
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 
@@ -156,7 +162,7 @@ def add_user(user, referrer=None):
     INSERT INTO users
     (id,username,points,games,wins,referrals,
      referred_by,last_seen,blocked,referral_rewarded)
-    VALUES(?,?,0,0,0,0,?,?,0,0)
+    VALUES(?,?,0,0,0,?,?,0,0)
     """, (
         user.id,
         user.username,
@@ -347,13 +353,7 @@ async def subscribed(user_id, context):
     return True
 
 
-async def require_sub(update, context):
-    user = update.effective_user
-
-    if await subscribed(user.id, context):
-        reward_referral(user.id)
-        return True
-
+def subscription_message():
     buttons = []
 
     for channel in sponsors():
@@ -377,7 +377,17 @@ async def require_sub(update, context):
         "Keyin <b>✅ TEKSHIRISH</b> tugmasini bosing."
     )
 
-    markup = InlineKeyboardMarkup(buttons)
+    return text, InlineKeyboardMarkup(buttons)
+
+
+async def require_sub(update, context):
+    user = update.effective_user
+
+    if await subscribed(user.id, context):
+        reward_referral(user.id)
+        return True
+
+    text, markup = subscription_message()
 
     if update.callback_query:
         await update.callback_query.message.reply_text(
@@ -419,7 +429,6 @@ def task_list(user_id):
     """, (user_id,)).fetchall()
 
     con.close()
-
     return rows
 
 
@@ -527,7 +536,6 @@ async def check_task(update, context, task_id):
             ChatMemberStatus.KICKED
         ):
             con.close()
-
             await update.callback_query.answer(
                 "❌ Avval kanalga obuna bo‘ling!",
                 show_alert=True
@@ -536,7 +544,6 @@ async def check_task(update, context, task_id):
 
     except TelegramError:
         con.close()
-
         await update.callback_query.answer(
             "❌ Tekshirishda xatolik. Bot kanalga admin qilinganini tekshiring.",
             show_alert=True
@@ -573,6 +580,16 @@ def home_markup(user_id):
     buttons = [
         [
             InlineKeyboardButton(
+                "⭐ STARS OLISH",
+                callback_data="buy"
+            ),
+            InlineKeyboardButton(
+                "🎰 STARS ISHLASH",
+                callback_data="stars_work"
+            )
+        ],
+        [
+            InlineKeyboardButton(
                 "🔥 QZU O‘YIN",
                 callback_data="games"
             ),
@@ -595,10 +612,6 @@ def home_markup(user_id):
             InlineKeyboardButton(
                 "💸 STARS YECHISH",
                 callback_data="withdraw"
-            ),
-            InlineKeyboardButton(
-                "⭐ STARS OLISH",
-                callback_data="buy"
             )
         ],
         [
@@ -629,8 +642,8 @@ async def home(update, context):
 
     text = (
         "🎉 <b>Bu yerda zerikmaysiz!</b>\n\n"
-        "🎮 O‘yin o‘ynang.\n"
-        f"⭐ Har bir g‘alaba: +{GAME_REWARD:.1f} ⭐\n"
+        "⭐ Stars olish va virtual ⭐ ball ishlash mumkin.\n"
+        f"🎮 Oddiy o‘yin g‘alabasi: +{GAME_REWARD:.1f} ⭐\n"
         f"👥 Referral: +{REFERRAL_REWARD:g} ⭐\n"
         f"🎯 Shart: +{TASK_REWARD:g} ⭐\n\n"
         "👇 Tanlang:"
@@ -672,7 +685,6 @@ GAMES = [
     "🎡 Omad g‘ildiragi",
 ]
 
-# Add many different generated game titles.
 EXTRA_GAMES = [
     "Rangni top", "Juft yoki toq", "Kattasini top", "Kichigini top",
     "To‘g‘ri yo‘l", "Sirli quti", "Kod buzish", "Raqamlar zanjiri",
@@ -706,7 +718,6 @@ EXTRA_GAMES = [
 
 GAMES.extend(EXTRA_GAMES)
 
-# 100+ bo‘lishini kafolatlash
 while len(GAMES) < 120:
     GAMES.append(f"🎮 Mini o‘yin #{len(GAMES)+1}")
 
@@ -779,9 +790,14 @@ async def show_games(update, context, page=0):
 async def play_game(update, context, index):
     user = update.effective_user
 
-    name = GAMES[index]
+    if index < 0 or index >= len(GAMES):
+        await update.callback_query.answer(
+            "❌ O‘yin topilmadi!",
+            show_alert=True
+        )
+        return
 
-    # Random challenge.
+    name = GAMES[index]
     kind = random.randint(1, 8)
 
     if kind == 1:
@@ -794,7 +810,10 @@ async def play_game(update, context, index):
 
         markup = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton(str(i), callback_data=f"ansnum:{i}")
+                InlineKeyboardButton(
+                    str(i),
+                    callback_data=f"ansnum:{i}"
+                )
                 for i in range(1, 6)
             ],
             [
@@ -1104,6 +1123,218 @@ async def answer_game(update, context, answer):
 
 
 # =========================
+# 🎰 STARS ISHLASH
+# =========================
+
+STARS_WORK_GAMES = [
+    ("🎲 ZAR", "casino_dice"),
+    ("🪙 TANGA", "casino_coin"),
+    ("🎯 NISHON", "casino_target"),
+    ("🃏 KARTA", "casino_card"),
+    ("🎰 SLOT", "casino_slot"),
+    ("🎡 OMAD G‘ILDIRAGI", "casino_wheel"),
+]
+
+
+def stars_work_menu():
+    buttons = []
+
+    for name, code in STARS_WORK_GAMES:
+        buttons.append([
+            InlineKeyboardButton(
+                name,
+                callback_data=code
+            )
+        ])
+
+    buttons.append([
+        InlineKeyboardButton(
+            "⭐ BALANS",
+            callback_data="balance"
+        )
+    ])
+
+    buttons.append([
+        InlineKeyboardButton(
+            "🔙 ORQAGA",
+            callback_data="home"
+        )
+    ])
+
+    return InlineKeyboardMarkup(buttons)
+
+
+async def stars_work(update, context):
+    u = get_user(update.effective_user.id)
+
+    text = (
+        "🎰 <b>STARS ISHLASH</b>\n\n"
+        "⭐ Bu bo‘limdagi ⭐ virtual ball hisoblanadi.\n"
+        "Bu o‘yinlar real pul yoki real Stars tikish uchun emas.\n\n"
+        f"💰 Balansingiz: <b>{u['points']:.1f} ⭐</b>\n\n"
+        "👇 O‘yin tanlang:"
+    )
+
+    await update.callback_query.message.edit_text(
+        text,
+        reply_markup=stars_work_menu(),
+        parse_mode="HTML"
+    )
+
+
+async def stars_work_game(update, context, game):
+    user_id = update.effective_user.id
+    u = get_user(user_id)
+
+    COST = 5.0
+
+    if u["points"] < COST:
+        await update.callback_query.answer(
+            "❌ Kamida 5 ⭐ virtual ball kerak!",
+            show_alert=True
+        )
+        return
+
+    con = connect()
+    cur = con.cursor()
+
+    cur.execute(
+        """
+        UPDATE users
+        SET points=ROUND(points-?,1)
+        WHERE id=? AND points>=?
+        """,
+        (COST, user_id, COST)
+    )
+
+    if cur.rowcount != 1:
+        con.close()
+        await update.callback_query.answer(
+            "❌ Balans yetarli emas.",
+            show_alert=True
+        )
+        return
+
+    con.commit()
+    con.close()
+
+    if game == "casino_dice":
+        result = random.randint(1, 6)
+
+        if result == 6:
+            reward = 10.0
+        elif result in (4, 5):
+            reward = 7.0
+        else:
+            reward = 0.0
+
+        title = "🎲 ZAR"
+        result_text = f"🎲 Zar: <b>{result}</b>"
+
+    elif game == "casino_coin":
+        result = random.choice(["🟢", "🔴"])
+
+        if result == "🟢":
+            reward = 10.0
+        else:
+            reward = 0.0
+
+        title = "🪙 TANGA"
+        result_text = f"🪙 Natija: <b>{result}</b>"
+
+    elif game == "casino_target":
+        result = random.randint(1, 10)
+
+        if result == 7:
+            reward = 25.0
+        elif result in (5, 6, 8):
+            reward = 7.0
+        else:
+            reward = 0.0
+
+        title = "🎯 NISHON"
+        result_text = f"🎯 Tushgan raqam: <b>{result}</b>"
+
+    elif game == "casino_card":
+        result = random.randint(1, 13)
+
+        if result == 13:
+            reward = 20.0
+        elif result in (10, 11, 12):
+            reward = 7.0
+        else:
+            reward = 0.0
+
+        title = "🃏 KARTA"
+        result_text = f"🃏 Karta qiymati: <b>{result}</b>"
+
+    elif game == "casino_slot":
+        symbols = ["🍒", "🍋", "🔔", "💎", "⭐"]
+
+        a = random.choice(symbols)
+        b = random.choice(symbols)
+        c = random.choice(symbols)
+
+        if a == b == c == "💎":
+            reward = 50.0
+        elif a == b == c:
+            reward = 25.0
+        elif a == b or b == c or a == c:
+            reward = 10.0
+        else:
+            reward = 0.0
+
+        title = "🎰 SLOT"
+        result_text = f"{a} {b} {c}"
+
+    else:
+        # Katta bonus juda kam chiqadi.
+        rewards = [0, 0, 0, 0, 0, 5, 7, 10, 25]
+        reward = random.choice(rewards)
+
+        title = "🎡 OMAD G‘ILDIRAGI"
+        result_text = f"🎡 Bonus: <b>+{reward:g} ⭐</b>"
+
+    if reward > 0:
+        add_points(user_id, reward)
+
+        text = (
+            f"🎰 <b>{title}</b>\n\n"
+            f"{result_text}\n\n"
+            f"🎉 Siz <b>+{reward:g} ⭐</b> virtual ball oldingiz!"
+        )
+    else:
+        text = (
+            f"🎰 <b>{title}</b>\n\n"
+            f"{result_text}\n\n"
+            "😅 Bu safar bonus chiqmadi."
+        )
+
+    u = get_user(user_id)
+
+    text += f"\n\n💰 Balans: <b>{u['points']:.1f} ⭐</b>"
+
+    await update.callback_query.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(
+                    "🎰 YANA O‘YNASH",
+                    callback_data="stars_work"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🏠 MENU",
+                    callback_data="home"
+                )
+            ]
+        ]),
+        parse_mode="HTML"
+    )
+
+
+# =========================
 # PROFIL / BALANS
 # =========================
 
@@ -1151,7 +1382,6 @@ async def referral(update, context):
     user = update.effective_user
 
     me = await context.bot.get_me()
-
     link = f"https://t.me/{me.username}?start=ref_{user.id}"
 
     u = get_user(user.id)
@@ -1163,7 +1393,7 @@ async def referral(update, context):
         "🔗 Sizning linkingiz:\n"
         f"<code>{link}</code>\n\n"
         "⚠️ Mukofot faqat yangi foydalanuvchi kanal shartini bajargandan "
-        "keyin beriladi."
+        "keyin bir marta beriladi."
     )
 
     await update.callback_query.message.edit_text(
@@ -1266,7 +1496,9 @@ async def process_withdraw(update, context):
     try:
         amount = float(update.message.text.replace(",", "."))
     except ValueError:
-        await update.message.reply_text("❌ Faqat son yozing. Masalan: 50")
+        await update.message.reply_text(
+            "❌ Faqat son yozing. Masalan: 50"
+        )
         return True
 
     user_id = update.effective_user.id
@@ -1279,7 +1511,9 @@ async def process_withdraw(update, context):
         return True
 
     if amount > u["points"]:
-        await update.message.reply_text("❌ Balansingiz yetarli emas.")
+        await update.message.reply_text(
+            "❌ Balansingiz yetarli emas."
+        )
         return True
 
     if u["referrals"] < MIN_REFERRALS:
@@ -1289,8 +1523,6 @@ async def process_withdraw(update, context):
         return True
 
     con = connect()
-
-    # Reserve/deduct the amount immediately so it cannot be withdrawn twice.
     cur = con.cursor()
 
     cur.execute("""
@@ -1301,7 +1533,9 @@ async def process_withdraw(update, context):
 
     if cur.rowcount != 1:
         con.close()
-        await update.message.reply_text("❌ Balans o‘zgardi. Qaytadan urinib ko‘ring.")
+        await update.message.reply_text(
+            "❌ Balans o‘zgardi. Qaytadan urinib ko‘ring."
+        )
         return True
 
     cur.execute("""
@@ -1420,6 +1654,10 @@ async def admin(update, context):
 
 async def admin_stats(update, context):
     if update.effective_user.id != ADMIN_ID:
+        await update.callback_query.answer(
+            "❌ Ruxsat yo‘q!",
+            show_alert=True
+        )
         return
 
     con = connect()
@@ -1480,6 +1718,10 @@ async def admin_stats(update, context):
 
 async def users_page(update, context, page):
     if update.effective_user.id != ADMIN_ID:
+        await update.callback_query.answer(
+            "❌ Ruxsat yo‘q!",
+            show_alert=True
+        )
         return
 
     con = connect()
@@ -1510,9 +1752,7 @@ async def users_page(update, context, page):
             status = "🚫 BLOCK"
         else:
             try:
-                seen = datetime.fromisoformat(
-                    r["last_seen"]
-                )
+                seen = datetime.fromisoformat(r["last_seen"])
 
                 if (
                     datetime.now(timezone.utc) - seen
@@ -1524,7 +1764,11 @@ async def users_page(update, context, page):
             except Exception:
                 status = "⚪ NOAKTIV"
 
-        name = f"@{r['username']}" if r["username"] else "username yo‘q"
+        name = (
+            f"@{r['username']}"
+            if r["username"]
+            else "username yo‘q"
+        )
 
         text += (
             f"{status} | {name}\n"
@@ -1534,7 +1778,6 @@ async def users_page(update, context, page):
         )
 
     buttons = []
-
     nav = []
 
     if page > 0:
@@ -1576,6 +1819,10 @@ async def users_page(update, context, page):
 
 async def task_admin(update, context):
     if update.effective_user.id != ADMIN_ID:
+        await update.callback_query.answer(
+            "❌ Ruxsat yo‘q!",
+            show_alert=True
+        )
         return
 
     rows = task_list(ADMIN_ID)
@@ -1601,8 +1848,22 @@ async def task_admin(update, context):
 # BROADCAST
 # =========================
 
+def mark_blocked(user_id):
+    con = connect()
+    con.execute(
+        "UPDATE users SET blocked=1 WHERE id=?",
+        (user_id,)
+    )
+    con.commit()
+    con.close()
+
+
 async def broadcast_start(update, context):
     if update.effective_user.id != ADMIN_ID:
+        await update.callback_query.answer(
+            "❌ Ruxsat yo‘q!",
+            show_alert=True
+        )
         return
 
     context.user_data["broadcast"] = True
@@ -1658,11 +1919,16 @@ async def broadcast_message(update, context):
                     message_id=update.message.message_id,
                 )
                 sent += 1
+            except Forbidden:
+                blocked += 1
+                mark_blocked(uid)
             except TelegramError:
                 failed += 1
 
         except TelegramError:
             failed += 1
+
+        await asyncio.sleep(0.04)
 
     context.user_data.pop("broadcast", None)
 
@@ -1694,6 +1960,7 @@ async def admin_text(update, context):
         channel = normalize(update.message.text)
 
         con = connect()
+
         try:
             con.execute(
                 "INSERT OR IGNORE INTO tasks(channel,reward) VALUES(?,?)",
@@ -1771,23 +2038,25 @@ async def admin_text(update, context):
 
 async def callback(update, context):
     q = update.callback_query
-    await q.answer()
-
     user = update.effective_user
     touch(user)
 
     data = q.data
 
     if data == "noop":
+        await q.answer()
         return
 
     if data == "home":
+        await q.answer()
         await home(update, context)
         return
 
     if data == "check_sub":
         if await subscribed(user.id, context):
             reward_referral(user.id)
+
+            await q.answer("✅ Obuna tasdiqlandi!")
 
             await q.message.edit_text(
                 "✅ <b>Obuna tasdiqlandi!</b>\n\n"
@@ -1803,11 +2072,13 @@ async def callback(update, context):
         return
 
     if data == "tasks":
+        await q.answer()
         await show_tasks(update, context)
         return
 
     if data.startswith("task:"):
         if not await subscribed(user.id, context):
+            await q.answer()
             await require_sub(update, context)
             return
 
@@ -1815,23 +2086,32 @@ async def callback(update, context):
         await check_task(update, context, task_id)
         return
 
-    # Barcha asosiy bo‘limlar subscription talab qiladi.
-    if data not in ("admin", "astats", "users:0") and data.startswith(
-        ("games", "play:", "ans", "balance", "profile", "ref", "withdraw", "top", "buy")
-    ):
-        if not await require_sub(update, context):
+    # Asosiy bo‘limlar uchun sponsor obunasi.
+    protected_prefixes = (
+        "games", "play:", "ans", "balance", "profile",
+        "ref", "withdraw", "top", "buy", "stars_work",
+        "casino_"
+    )
+
+    if data.startswith(protected_prefixes):
+        if not await subscribed(user.id, context):
+            await q.answer()
+            await require_sub(update, context)
             return
 
     if data == "games":
+        await q.answer()
         await show_games(update, context, 0)
         return
 
     if data.startswith("games:"):
+        await q.answer()
         page = int(data.split(":")[1])
         await show_games(update, context, page)
         return
 
     if data.startswith("play:"):
+        await q.answer()
         await play_game(
             update,
             context,
@@ -1840,6 +2120,7 @@ async def callback(update, context):
         return
 
     if data.startswith("ansnum:"):
+        await q.answer()
         await answer_game(
             update,
             context,
@@ -1848,6 +2129,7 @@ async def callback(update, context):
         return
 
     if data.startswith("ansem:"):
+        await q.answer()
         await answer_game(
             update,
             context,
@@ -1856,6 +2138,7 @@ async def callback(update, context):
         return
 
     if data.startswith("ansmath:"):
+        await q.answer()
         await answer_game(
             update,
             context,
@@ -1864,6 +2147,7 @@ async def callback(update, context):
         return
 
     if data.startswith("ansdir:"):
+        await q.answer()
         await answer_game(
             update,
             context,
@@ -1872,6 +2156,7 @@ async def callback(update, context):
         return
 
     if data.startswith("ansquick:"):
+        await q.answer()
         await answer_game(
             update,
             context,
@@ -1880,6 +2165,7 @@ async def callback(update, context):
         return
 
     if data.startswith("ansdoor:"):
+        await q.answer()
         await answer_game(
             update,
             context,
@@ -1888,6 +2174,7 @@ async def callback(update, context):
         return
 
     if data.startswith("ansanimal:"):
+        await q.answer()
         await answer_game(
             update,
             context,
@@ -1896,6 +2183,7 @@ async def callback(update, context):
         return
 
     if data.startswith("anschoice:"):
+        await q.answer()
         await answer_game(
             update,
             context,
@@ -1904,34 +2192,85 @@ async def callback(update, context):
         return
 
     if data == "balance":
+        await q.answer()
         await balance(update, context)
         return
 
     if data == "profile":
+        await q.answer()
         await profile(update, context)
         return
 
     if data == "ref":
+        await q.answer()
         await referral(update, context)
         return
 
     if data == "top":
+        await q.answer()
         await top(update, context)
         return
 
     if data == "withdraw":
+        await q.answer()
         await withdraw(update, context)
         return
 
     if data == "buy":
+        await q.answer()
+
         await q.message.edit_text(
             "⭐ <b>STARS OLISH</b>\n\n"
-            "👇 Stars olish uchun tugmani bosing:",
+            "👇 Stars olish uchun kerakli paketni tanlang:\n\n"
+            "⭐ 50\n"
+            "⭐ 100\n"
+            "⭐ 200\n"
+            "⭐ 500\n"
+            "⭐ 1000\n"
+            "⭐ 2000\n"
+            "⭐ 5000\n\n"
+            "✏️ Boshqa miqdor uchun admin bilan bog‘laning.",
             reply_markup=InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton(
-                        "⭐ STARS OLISH",
-                        url=BUY_STARS
+                        "⭐ 50",
+                        callback_data="buy:50"
+                    ),
+                    InlineKeyboardButton(
+                        "⭐ 100",
+                        callback_data="buy:100"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "⭐ 200",
+                        callback_data="buy:200"
+                    ),
+                    InlineKeyboardButton(
+                        "⭐ 500",
+                        callback_data="buy:500"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "⭐ 1000",
+                        callback_data="buy:1000"
+                    ),
+                    InlineKeyboardButton(
+                        "⭐ 2000",
+                        callback_data="buy:2000"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "⭐ 5000",
+                        callback_data="buy:5000"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "✏️ BOSHQA MIQDOR",
+                        callback_data="buy_custom"
                     )
                 ],
                 [
@@ -1945,25 +2284,89 @@ async def callback(update, context):
         )
         return
 
+    if data.startswith("buy:"):
+        await q.answer()
+
+        amount = data.split(":", 1)[1]
+
+        await q.message.edit_text(
+            f"⭐ <b>{amount} STARS</b>\n\n"
+            "Telegram Stars orqali xarid qilish uchun quyidagi "
+            "tugmani bosing.\n\n"
+            "⚠️ Bu bo‘lim real Starsni kazino tikishiga aylantirmaydi.",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "⭐ STARS OLISH",
+                        url=BUY_STARS
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        "🔙 ORQAGA",
+                        callback_data="buy"
+                    )
+                ]
+            ]),
+            parse_mode="HTML"
+        )
+        return
+
+    if data == "buy_custom":
+        await q.answer(
+            "✏️ Boshqa miqdor uchun admin bilan bog‘laning.",
+            show_alert=True
+        )
+        return
+
+    if data == "stars_work":
+        await q.answer()
+        await stars_work(update, context)
+        return
+
+    if data in (
+        "casino_dice",
+        "casino_coin",
+        "casino_target",
+        "casino_card",
+        "casino_slot",
+        "casino_wheel"
+    ):
+        await q.answer()
+        await stars_work_game(update, context, data)
+        return
+
     # ADMIN
     if data == "admin":
+        await q.answer()
         await admin(update, context)
         return
 
     if data == "astats":
+        await q.answer()
         await admin_stats(update, context)
         return
 
     if data.startswith("users:"):
+        await q.answer()
         page = int(data.split(":")[1])
         await users_page(update, context, page)
         return
 
     if data == "broadcast":
+        await q.answer()
         await broadcast_start(update, context)
         return
 
     if data == "addtask":
+        if user.id != ADMIN_ID:
+            await q.answer(
+                "❌ Ruxsat yo‘q!",
+                show_alert=True
+            )
+            return
+
+        await q.answer()
         context.user_data["admin_mode"] = "addtask"
 
         await q.message.edit_text(
@@ -1976,6 +2379,14 @@ async def callback(update, context):
         return
 
     if data == "deltask":
+        if user.id != ADMIN_ID:
+            await q.answer(
+                "❌ Ruxsat yo‘q!",
+                show_alert=True
+            )
+            return
+
+        await q.answer()
         context.user_data["admin_mode"] = "deltask"
 
         await q.message.edit_text(
@@ -1986,10 +2397,19 @@ async def callback(update, context):
         return
 
     if data == "taskadmin":
+        await q.answer()
         await task_admin(update, context)
         return
 
     if data == "addsponsor":
+        if user.id != ADMIN_ID:
+            await q.answer(
+                "❌ Ruxsat yo‘q!",
+                show_alert=True
+            )
+            return
+
+        await q.answer()
         context.user_data["admin_mode"] = "addsponsor"
 
         await q.message.edit_text(
@@ -2001,6 +2421,14 @@ async def callback(update, context):
         return
 
     if data == "delsponsor":
+        if user.id != ADMIN_ID:
+            await q.answer(
+                "❌ Ruxsat yo‘q!",
+                show_alert=True
+            )
+            return
+
+        await q.answer()
         context.user_data["admin_mode"] = "delsponsor"
 
         await q.message.edit_text(
@@ -2009,6 +2437,11 @@ async def callback(update, context):
             parse_mode="HTML"
         )
         return
+
+    await q.answer(
+        "❌ Noma’lum tugma.",
+        show_alert=True
+    )
 
 
 # =========================
@@ -2045,6 +2478,17 @@ async def start(update, context):
     reward_referral(user.id)
 
     await home(update, context)
+
+
+# =========================
+# USER ID
+# =========================
+
+async def my_id(update, context):
+    await update.message.reply_text(
+        f"🆔 Sizning Telegram ID: <code>{update.effective_user.id}</code>",
+        parse_mode="HTML"
+    )
 
 
 # =========================
@@ -2106,6 +2550,7 @@ def main():
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("cancel", cancel))
+    app.add_handler(CommandHandler("id", my_id))
 
     app.add_handler(
         CallbackQueryHandler(callback)
@@ -2119,6 +2564,7 @@ def main():
     )
 
     logger.info("ZERIKDIM BOT ISHLADI")
+
     app.run_polling(
         allowed_updates=Update.ALL_TYPES
     )
