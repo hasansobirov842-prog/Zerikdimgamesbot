@@ -32,4 +32,5 @@ jobs:
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           ADMIN_ID: ${{ secrets.ADMIN_ID }}
-        run: python bot.py
+        run: |
+          python bot.py
