@@ -18,14 +18,14 @@ from telegram.ext import (
     filters,
 )
 
+# ==========================================================
+# SOZLAMALAR
+# ==========================================================
+
 TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 DB_FILE = "zerikdim.db"
-
-# ==========================================================
-# HOMIY KANALLAR
-# ==========================================================
 
 SPONSOR_CHANNELS = [
     "@FORUMUZ_Z",
@@ -45,8 +45,8 @@ TASK_REWARD = 5.0
 
 MIN_WITHDRAW = 200.0
 MIN_REFERRALS = 20
-GAME_COOLDOWN = 30
 
+GAME_COOLDOWN = 30
 PAGE_SIZE = 10
 
 logging.basicConfig(
@@ -55,6 +55,7 @@ logging.basicConfig(
 )
 
 log = logging.getLogger("zerikdim")
+
 
 # ==========================================================
 # O'YINLAR
@@ -75,7 +76,7 @@ GAMES = [
     ("⏱ Tezlik", "speed"),
 ]
 
-# QIYINROQ SAVOLLAR
+
 QUIZ = [
     (
         "O‘zbekiston Konstitutsiyasi qaysi yilda qabul qilingan?",
@@ -119,6 +120,7 @@ QUIZ = [
     ),
 ]
 
+
 LOGIC_QUESTIONS = [
     (
         "Ketma-ketlikni davom ettir: 2, 6, 12, 20, 30, ?",
@@ -147,6 +149,7 @@ LOGIC_QUESTIONS = [
     ),
 ]
 
+
 WORDS = [
     ("HSTOAN", "TOSHAN"),
     ("KTOBII", "KITOBI"),
@@ -157,12 +160,14 @@ WORDS = [
     ("DORS", "DORS"),
 ]
 
+
 COLORS = [
     ("🔴 QIZIL", "qizil"),
     ("🔵 KO‘K", "ko‘k"),
     ("🟢 YASHIL", "yashil"),
     ("🟡 SARIQ", "sariq"),
 ]
+
 
 KNOWLEDGE = [
     (
@@ -187,6 +192,7 @@ KNOWLEDGE = [
     ),
 ]
 
+
 # ==========================================================
 # YORDAMCHI
 # ==========================================================
@@ -196,81 +202,18 @@ def now():
 
 
 def db():
-    return sqlite3.connect(DB_FILE, timeout=30)
+    con = sqlite3.connect(
+        DB_FILE,
+        timeout=30
+    )
+
+    con.execute("PRAGMA busy_timeout=30000")
+
+    return con
 
 
-# ==========================================================
-# GITHUBGA BAZANI SAQLASH
-# ==========================================================
-
-save_lock = asyncio.Lock()
-
-
-async def save_database():
-    async with save_lock:
-
-        def _save():
-            try:
-                subprocess.run(
-                    ["git", "config", "user.name", "Zerikdim Bot"],
-                    check=False
-                )
-
-                subprocess.run(
-                    [
-                        "git",
-                        "config",
-                        "user.email",
-                        "zerikdim-bot@users.noreply.github.com"
-                    ],
-                    check=False
-                )
-
-                subprocess.run(
-                    ["git", "add", DB_FILE],
-                    check=False
-                )
-
-                result = subprocess.run(
-                    ["git", "diff", "--cached", "--quiet"],
-                    capture_output=True
-                )
-
-                if result.returncode == 0:
-                    return
-
-                subprocess.run(
-                    [
-                        "git",
-                        "commit",
-                        "-m",
-                        "Update Zerikdim database"
-                    ],
-                    check=False
-                )
-
-                subprocess.run(
-                    ["git", "push"],
-                    check=False
-                )
-
-                log.info("Database GitHubga saqlandi.")
-
-            except Exception as e:
-                log.error("Database save error: %s", e)
-
-        await asyncio.to_thread(_save)
-
-
-async def periodic_database_backup():
-    while True:
-        try:
-            await asyncio.sleep(60)
-            await save_database()
-        except asyncio.CancelledError:
-            break
-        except Exception as e:
-            log.error("Backup error: %s", e)
+def format_count(number):
+    return f"{int(number):,}".replace(",", " ")
 
 
 # ==========================================================
@@ -278,6 +221,7 @@ async def periodic_database_backup():
 # ==========================================================
 
 def init_db():
+
     con = db()
     cur = con.cursor()
 
@@ -335,35 +279,131 @@ def init_db():
     cur.execute(
         "SELECT COUNT(*) FROM users"
     )
-    current_users = cur.fetchone()[0]
+
+    current_users = int(
+        cur.fetchone()[0]
+    )
 
     cur.execute(
         "SELECT id, total_users FROM bot_stats WHERE id=1"
     )
+
     stats = cur.fetchone()
 
     if not stats:
+
         cur.execute("""
         INSERT INTO bot_stats
         (id, started_at, total_users)
         VALUES (1, ?, ?)
-        """, (now(), current_users))
-    elif current_users > stats[1]:
-        cur.execute("""
-        UPDATE bot_stats
-        SET total_users=?
-        WHERE id=1
-        """, (current_users,))
+        """, (
+            now(),
+            current_users
+        ))
+
+    else:
+
+        # Eski katta sonni hech qachon kamaytirmaymiz
+        old_total = int(stats[1] or 0)
+
+        if current_users > old_total:
+
+            cur.execute("""
+            UPDATE bot_stats
+            SET total_users=?
+            WHERE id=1
+            """, (
+                current_users,
+            ))
 
     con.commit()
     con.close()
+
+    log.info(
+        "Database tayyor. Jami user: %s",
+        current_users
+    )
+
+
+# ==========================================================
+# USER COUNT
+# ==========================================================
+
+def get_total_users_sync():
+
+    con = db()
+    cur = con.cursor()
+
+    cur.execute(
+        "SELECT total_users FROM bot_stats WHERE id=1"
+    )
+
+    row = cur.fetchone()
+
+    if row:
+        total = int(row[0] or 0)
+    else:
+        cur.execute(
+            "SELECT COUNT(*) FROM users"
+        )
+        total = int(cur.fetchone()[0])
+
+    con.close()
+
+    return total
+
+
+async def get_total_users():
+
+    return await asyncio.to_thread(
+        get_total_users_sync
+    )
+
+
+async def update_bot_user_count(bot):
+
+    try:
+
+        total = await get_total_users()
+
+        description = (
+            f"👥 {format_count(total)} ta foydalanuvchi"
+        )
+
+        await bot.set_my_short_description(
+            short_description=description
+        )
+
+        log.info(
+            "Bot profilidagi user soni yangilandi: %s",
+            total
+        )
+
+    except TelegramError as e:
+
+        log.error(
+            "Bot short description error: %s",
+            e
+        )
+
+    except Exception as e:
+
+        log.error(
+            "User count update error: %s",
+            e
+        )
 
 
 # ==========================================================
 # USER
 # ==========================================================
 
-def add_user_sync(user_id, username=None, ref=None):
+def add_user_sync(
+    user_id,
+    username=None,
+    ref=None
+):
+
     con = db()
     cur = con.cursor()
 
@@ -374,7 +414,11 @@ def add_user_sync(user_id, username=None, ref=None):
 
     exists = cur.fetchone()
 
+    created = False
+
     if not exists:
+
+        created = True
 
         valid_ref = (
             ref
@@ -404,6 +448,7 @@ def add_user_sync(user_id, username=None, ref=None):
             now()
         ))
 
+        # Lifetime user counter
         cur.execute("""
         UPDATE bot_stats
         SET total_users=total_users+1
@@ -435,7 +480,9 @@ def add_user_sync(user_id, username=None, ref=None):
                 UPDATE users
                 SET referral_rewarded=1
                 WHERE id=?
-                """, (user_id,))
+                """, (
+                    user_id,
+                ))
 
     else:
 
@@ -454,17 +501,33 @@ def add_user_sync(user_id, username=None, ref=None):
     con.commit()
     con.close()
 
+    return created
 
-async def add_user(user_id, username=None, ref=None):
-    await asyncio.to_thread(
+
+async def add_user(
+    user_id,
+    username=None,
+    ref=None,
+    bot=None
+):
+
+    created = await asyncio.to_thread(
         add_user_sync,
         user_id,
         username,
         ref
     )
 
+    # Faqat yangi user kelganda Telegram profilini yangilaymiz
+    if created and bot:
+
+        await update_bot_user_count(
+            bot
+        )
+
 
 def get_user(user_id):
+
     con = db()
     cur = con.cursor()
 
@@ -480,7 +543,11 @@ def get_user(user_id):
     return row
 
 
-def change_points_sync(user_id, amount):
+def change_points_sync(
+    user_id,
+    amount
+):
+
     con = db()
     cur = con.cursor()
 
@@ -497,7 +564,11 @@ def change_points_sync(user_id, amount):
     con.close()
 
 
-async def change_points(user_id, amount):
+async def change_points(
+    user_id,
+    amount
+):
+
     await asyncio.to_thread(
         change_points_sync,
         user_id,
@@ -505,7 +576,11 @@ async def change_points(user_id, amount):
     )
 
 
-def game_result_sync(user_id, won):
+def game_result_sync(
+    user_id,
+    won
+):
+
     con = db()
     cur = con.cursor()
 
@@ -523,7 +598,11 @@ def game_result_sync(user_id, won):
     con.close()
 
 
-async def game_result(user_id, won):
+async def game_result(
+    user_id,
+    won
+):
+
     await asyncio.to_thread(
         game_result_sync,
         user_id,
@@ -532,14 +611,234 @@ async def game_result(user_id, won):
 
 
 # ==========================================================
+# GITHUB BACKUP
+# ==========================================================
+
+save_lock = asyncio.Lock()
+
+
+def git_command(
+    command,
+    timeout=60
+):
+
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        timeout=timeout
+    )
+
+
+async def save_database():
+
+    async with save_lock:
+
+        def _save():
+
+            try:
+
+                if not os.path.exists(DB_FILE):
+
+                    log.error(
+                        "DB fayl mavjud emas: %s",
+                        DB_FILE
+                    )
+
+                    return False
+
+                # SQLite yozuvlari tugaganini kutamiz
+                con = sqlite3.connect(
+                    DB_FILE,
+                    timeout=30
+                )
+
+                try:
+                    con.execute(
+                        "PRAGMA wal_checkpoint(FULL)"
+                    )
+                except Exception:
+                    pass
+
+                con.close()
+
+                # Git identity
+                r = git_command([
+                    "git",
+                    "config",
+                    "user.name",
+                    "Zerikdim Bot"
+                ])
+
+                if r.returncode != 0:
+                    log.error(
+                        "git config user.name: %s",
+                        r.stderr
+                    )
+
+                r = git_command([
+                    "git",
+                    "config",
+                    "user.email",
+                    "zerikdim-bot@users.noreply.github.com"
+                ])
+
+                if r.returncode != 0:
+                    log.error(
+                        "git config user.email: %s",
+                        r.stderr
+                    )
+
+                # DB ignored bo‘lsa ham majburan qo‘shiladi
+                r = git_command([
+                    "git",
+                    "add",
+                    "-f",
+                    DB_FILE
+                ])
+
+                if r.returncode != 0:
+
+                    log.error(
+                        "git add xatosi: %s",
+                        r.stderr
+                    )
+
+                    return False
+
+                # O‘zgarish bormi?
+                r = git_command([
+                    "git",
+                    "diff",
+                    "--cached",
+                    "--quiet"
+                ])
+
+                if r.returncode == 0:
+
+                    log.info(
+                        "Database o‘zgarmagan."
+                    )
+
+                    return True
+
+                # Commit
+                r = git_command([
+                    "git",
+                    "commit",
+                    "-m",
+                    "Update Zerikdim database"
+                ])
+
+                if r.returncode != 0:
+
+                    log.error(
+                        "git commit xatosi: %s",
+                        r.stderr
+                    )
+
+                    return False
+
+                # Branchni aniqlaymiz
+                r = git_command([
+                    "git",
+                    "branch",
+                    "--show-current"
+                ])
+
+                branch = r.stdout.strip()
+
+                if not branch:
+
+                    branch = "main"
+
+                # Push
+                r = git_command([
+                    "git",
+                    "push",
+                    "origin",
+                    branch
+                ])
+
+                if r.returncode != 0:
+
+                    log.error(
+                        "❌ DATABASE GITHUBGA PUSH BO‘LMADI: %s",
+                        r.stderr
+                    )
+
+                    return False
+
+                log.info(
+                    "✅ Database GitHubga muvaffaqiyatli saqlandi."
+                )
+
+                return True
+
+            except subprocess.TimeoutExpired:
+
+                log.error(
+                    "Git operatsiyasi timeout bo‘ldi."
+                )
+
+                return False
+
+            except Exception as e:
+
+                log.error(
+                    "Database save error: %s",
+                    e,
+                    exc_info=True
+                )
+
+                return False
+
+        return await asyncio.to_thread(
+            _save
+        )
+
+
+async def periodic_database_backup():
+
+    # Bot ishga tushgandan keyin biroz kutadi
+    await asyncio.sleep(30)
+
+    while True:
+
+        try:
+
+            await save_database()
+
+            # Har 60 sekundda backup
+            await asyncio.sleep(60)
+
+        except asyncio.CancelledError:
+
+            break
+
+        except Exception as e:
+
+            log.error(
+                "Periodic backup error: %s",
+                e
+            )
+
+            await asyncio.sleep(60)
+
+
+# ==========================================================
 # MAJBURIY OBUNA
 # ==========================================================
 
-async def subscribed(bot, user_id):
+async def subscribed(
+    bot,
+    user_id
+):
 
     for channel in SPONSOR_CHANNELS:
 
         try:
+
             member = await bot.get_chat_member(
                 channel,
                 user_id
@@ -550,24 +849,29 @@ async def subscribed(bot, user_id):
                 ChatMemberStatus.ADMINISTRATOR,
                 ChatMemberStatus.OWNER
             ):
+
                 return False
 
         except TelegramError as e:
+
             log.error(
                 "Obuna tekshirish xatosi %s: %s",
                 channel,
                 e
             )
+
             return False
 
     return True
 
 
-async def require_subscription(update, context):
+async def require_subscription(
+    update,
+    context
+):
 
     user_id = update.effective_user.id
 
-    # Admin majburiy obunadan o'tadi
     if user_id == ADMIN_ID:
         return True
 
@@ -575,6 +879,7 @@ async def require_subscription(update, context):
         context.bot,
         user_id
     ):
+
         return True
 
     keyboard = [
@@ -607,16 +912,23 @@ async def require_subscription(update, context):
     )
 
     if update.callback_query:
+
         await update.callback_query.message.reply_text(
             text,
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=InlineKeyboardMarkup(
+                keyboard
+            )
         )
+
     else:
+
         await update.message.reply_text(
             text,
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=InlineKeyboardMarkup(
+                keyboard
+            )
         )
 
     return False
@@ -626,27 +938,33 @@ async def require_subscription(update, context):
 # ASOSIY MENYU
 # ==========================================================
 
-def main_menu(is_admin=False):
+def main_menu(
+    is_admin=False
+):
 
     keyboard = [
+
         [
             InlineKeyboardButton(
                 "⭐ STARS OLISH",
                 callback_data="buy"
             )
         ],
+
         [
             InlineKeyboardButton(
                 "🎯 STARS ISHLASH",
                 callback_data="games"
             )
         ],
+
         [
             InlineKeyboardButton(
                 "🎮 O‘YINLAR",
                 callback_data="other_games"
             )
         ],
+
         [
             InlineKeyboardButton(
                 "💰 BALANS",
@@ -657,6 +975,7 @@ def main_menu(is_admin=False):
                 callback_data="tasks"
             )
         ],
+
         [
             InlineKeyboardButton(
                 "👥 REFERAL",
@@ -667,6 +986,7 @@ def main_menu(is_admin=False):
                 callback_data="withdraw"
             )
         ],
+
         [
             InlineKeyboardButton(
                 "🏆 REYTING",
@@ -680,6 +1000,7 @@ def main_menu(is_admin=False):
     ]
 
     if is_admin:
+
         keyboard.append([
             InlineKeyboardButton(
                 "⚙️ ADMIN PANEL",
@@ -687,43 +1008,59 @@ def main_menu(is_admin=False):
             )
         ])
 
-    return InlineKeyboardMarkup(keyboard)
+    return InlineKeyboardMarkup(
+        keyboard
+    )
 
 
 # ==========================================================
 # START
 # ==========================================================
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
     user = update.effective_user
 
     ref = None
 
     if context.args:
+
         try:
-            ref = int(context.args[0])
+            ref = int(
+                context.args[0]
+            )
         except ValueError:
             ref = None
 
     await add_user(
         user.id,
         user.username,
-        ref
+        ref,
+        context.bot
     )
 
     if not await require_subscription(
         update,
         context
     ):
+
         return
 
-    admin = user.id == ADMIN_ID
+    admin = (
+        user.id == ADMIN_ID
+    )
+
+    total_users = await get_total_users()
 
     await update.message.reply_text(
         "👋 <b>Zerikdim Botga xush kelibsiz!</b>\n\n"
         "⭐ Stars ishlang, topshiriqlar bajaring va "
         "do‘stlaringizni taklif qiling.\n\n"
+        f"👥 <b>Botdagi jami foydalanuvchilar: "
+        f"{format_count(total_users)} ta</b>\n\n"
         "👇 Kerakli bo‘limni tanlang:",
         parse_mode="HTML",
         reply_markup=main_menu(admin)
@@ -731,16 +1068,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ==========================================================
-# O'YINLAR MENYUSI
+# O'YIN MENYUSI
 # ==========================================================
 
 def games_menu():
+
     keyboard = []
 
-    for i in range(0, len(GAMES), 2):
+    for i in range(
+        0,
+        len(GAMES),
+        2
+    ):
+
         row = []
 
         name1, code1 = GAMES[i]
+
         row.append(
             InlineKeyboardButton(
                 name1,
@@ -749,7 +1093,9 @@ def games_menu():
         )
 
         if i + 1 < len(GAMES):
+
             name2, code2 = GAMES[i + 1]
+
             row.append(
                 InlineKeyboardButton(
                     name2,
@@ -766,31 +1112,51 @@ def games_menu():
         )
     ])
 
-    return InlineKeyboardMarkup(keyboard)
+    return InlineKeyboardMarkup(
+        keyboard
+    )
 
 
 # ==========================================================
 # GAME COOLDOWN
 # ==========================================================
 
-def can_play(context, user_id):
+def can_play(
+    context,
+    user_id
+):
 
     key = f"game_last_{user_id}"
 
-    last = context.user_data.get(key)
+    last = context.user_data.get(
+        key
+    )
 
     if last is None:
         return True, 0
 
-    elapsed = asyncio.get_event_loop().time() - last
+    elapsed = (
+        asyncio.get_event_loop().time()
+        - last
+    )
 
     if elapsed < GAME_COOLDOWN:
-        return False, int(GAME_COOLDOWN - elapsed)
+
+        return (
+            False,
+            int(
+                GAME_COOLDOWN - elapsed
+            )
+        )
 
     return True, 0
 
 
-def mark_game(context, user_id):
+def mark_game(
+    context,
+    user_id
+):
+
     context.user_data[
         f"game_last_{user_id}"
     ] = asyncio.get_event_loop().time()
@@ -800,7 +1166,11 @@ def mark_game(context, user_id):
 # GAME START
 # ==========================================================
 
-async def start_game(update, context, game):
+async def start_game(
+    update,
+    context,
+    game
+):
 
     user_id = update.effective_user.id
 
@@ -810,24 +1180,31 @@ async def start_game(update, context, game):
     )
 
     if not allowed:
+
         await update.callback_query.message.reply_text(
             f"⏳ Keyingi o‘yinni boshlash uchun "
             f"<b>{wait} soniya</b> kuting.",
             parse_mode="HTML"
         )
+
         return
 
-    mark_game(context, user_id)
+    mark_game(
+        context,
+        user_id
+    )
 
     q = update.callback_query
 
-    # ------------------------------------------------------
+    # ======================================================
     # QUIZ
-    # ------------------------------------------------------
+    # ======================================================
 
     if game == "quiz":
 
-        question, answers, correct = random.choice(QUIZ)
+        question, answers, correct = random.choice(
+            QUIZ
+        )
 
         context.user_data["game"] = {
             "type": "quiz",
@@ -850,17 +1227,23 @@ async def start_game(update, context, game):
             f"{question}\n\n"
             "To‘g‘ri javobni tanlang:",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=InlineKeyboardMarkup(
+                keyboard
+            )
         )
+
         return
 
-    # ------------------------------------------------------
+    # ======================================================
     # NUMBER
-    # ------------------------------------------------------
+    # ======================================================
 
     if game == "number":
 
-        number = random.randint(1, 100)
+        number = random.randint(
+            1,
+            100
+        )
 
         context.user_data["game"] = {
             "type": "number",
@@ -876,19 +1259,26 @@ async def start_game(update, context, game):
             "⚠️ 7 ta urinish bor.",
             parse_mode="HTML"
         )
+
         return
 
-    # ------------------------------------------------------
+    # ======================================================
     # CHOICE
-    # ------------------------------------------------------
+    # ======================================================
 
     if game == "choice":
 
         options = [
-            "A", "B", "C", "D", "E"
+            "A",
+            "B",
+            "C",
+            "D",
+            "E"
         ]
 
-        correct = random.choice(options)
+        correct = random.choice(
+            options
+        )
 
         context.user_data["game"] = {
             "type": "choice",
@@ -896,7 +1286,9 @@ async def start_game(update, context, game):
             "reward": 1.0
         }
 
-        random.shuffle(options)
+        random.shuffle(
+            options
+        )
 
         keyboard = [
             [
@@ -917,26 +1309,18 @@ async def start_game(update, context, game):
 
         await q.message.reply_text(
             "⚡ <b>Tez tanla</b>\n\n"
-            "To‘g‘ri variantni toping.\n"
-            "5 ta variantdan faqat bittasi to‘g‘ri.\n\n"
-            f"🔐 Maxfiy javob: {correct}",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
-
-        # Maxfiy javobni xabarda ko‘rsatmaslik uchun qayta
-        await q.message.delete()
-        await q.message.chat.send_message(
-            "⚡ <b>Tez tanla</b>\n\n"
             "5 ta variantdan to‘g‘ri javobni tanlang:",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=InlineKeyboardMarkup(
+                keyboard
+            )
         )
+
         return
 
-    # ------------------------------------------------------
+    # ======================================================
     # LOGIC
-    # ------------------------------------------------------
+    # ======================================================
 
     if game == "logic":
 
@@ -964,17 +1348,23 @@ async def start_game(update, context, game):
             "🧩 <b>Mantiqiy masala</b>\n\n"
             f"{question}",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=InlineKeyboardMarkup(
+                keyboard
+            )
         )
+
         return
 
-    # ------------------------------------------------------
+    # ======================================================
     # TARGET
-    # ------------------------------------------------------
+    # ======================================================
 
     if game == "target":
 
-        target = random.randint(1, 9)
+        target = random.randint(
+            1,
+            9
+        )
 
         context.user_data["game"] = {
             "type": "target",
@@ -984,9 +1374,16 @@ async def start_game(update, context, game):
 
         keyboard = []
 
-        nums = list(range(1, 10))
+        nums = list(
+            range(1, 10)
+        )
 
-        for i in range(0, 9, 3):
+        for i in range(
+            0,
+            9,
+            3
+        ):
+
             keyboard.append([
                 InlineKeyboardButton(
                     str(x),
@@ -1001,23 +1398,34 @@ async def start_game(update, context, game):
             "nishonni toping.\n\n"
             "💡 Ishora: nishon juft yoki toq bo‘lishi mumkin.",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=InlineKeyboardMarkup(
+                keyboard
+            )
         )
+
         return
 
-    # ------------------------------------------------------
+    # ======================================================
     # WORD
-    # ------------------------------------------------------
+    # ======================================================
 
     if game == "word":
 
-        scrambled, correct_word = random.choice(WORDS)
+        scrambled, correct_word = random.choice(
+            WORDS
+        )
 
-        # oddiy so'zlar uchun qayta aralashtirish
-        letters = list(correct_word)
-        random.shuffle(letters)
+        letters = list(
+            correct_word
+        )
 
-        scrambled = "".join(letters)
+        random.shuffle(
+            letters
+        )
+
+        scrambled = "".join(
+            letters
+        )
 
         context.user_data["game"] = {
             "type": "word",
@@ -1032,17 +1440,29 @@ async def start_game(update, context, game):
             "So‘zni yozib yuboring.",
             parse_mode="HTML"
         )
+
         return
 
-    # ------------------------------------------------------
+    # ======================================================
     # MATH
-    # ------------------------------------------------------
+    # ======================================================
 
     if game == "math":
 
-        a = random.randint(15, 80)
-        b = random.randint(5, 40)
-        c = random.randint(2, 9)
+        a = random.randint(
+            15,
+            80
+        )
+
+        b = random.randint(
+            5,
+            40
+        )
+
+        c = random.randint(
+            2,
+            9
+        )
 
         operations = [
             ("+", a + b * c),
@@ -1050,13 +1470,20 @@ async def start_game(update, context, game):
             ("×", a * b + c),
         ]
 
-        operation, answer = random.choice(operations)
+        operation, answer = random.choice(
+            operations
+        )
 
         if operation == "+":
+
             text = f"{a} + {b} × {c}"
+
         elif operation == "-":
+
             text = f"{a} × {c} − {b}"
+
         else:
+
             text = f"{a} × {b} + {c}"
 
         context.user_data["game"] = {
@@ -1071,18 +1498,26 @@ async def start_game(update, context, game):
             "⚠️ Amallar tartibiga e’tibor bering.",
             parse_mode="HTML"
         )
+
         return
 
-    # ------------------------------------------------------
+    # ======================================================
     # ATTENTION
-    # ------------------------------------------------------
+    # ======================================================
 
     if game == "attention":
 
-        nums = list(range(1, 10))
-        random.shuffle(nums)
+        nums = list(
+            range(1, 10)
+        )
 
-        special = random.choice(nums)
+        random.shuffle(
+            nums
+        )
+
+        special = random.choice(
+            nums
+        )
 
         context.user_data["game"] = {
             "type": "attention",
@@ -1092,7 +1527,12 @@ async def start_game(update, context, game):
 
         keyboard = []
 
-        for i in range(0, 9, 3):
+        for i in range(
+            0,
+            9,
+            3
+        ):
+
             keyboard.append([
                 InlineKeyboardButton(
                     str(x),
@@ -1107,20 +1547,31 @@ async def start_game(update, context, game):
             "bittasi yashirin nishon.\n"
             "Uni toping.",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=InlineKeyboardMarkup(
+                keyboard
+            )
         )
+
         return
 
-    # ------------------------------------------------------
+    # ======================================================
     # COLOR
-    # ------------------------------------------------------
+    # ======================================================
 
     if game == "color":
 
-        correct_text, correct_value = random.choice(COLORS)
+        correct_text, correct_value = random.choice(
+            COLORS
+        )
 
-        options = [x[1] for x in COLORS]
-        random.shuffle(options)
+        options = [
+            x[1]
+            for x in COLORS
+        ]
+
+        random.shuffle(
+            options
+        )
 
         context.user_data["game"] = {
             "type": "color",
@@ -1150,13 +1601,16 @@ async def start_game(update, context, game):
             f"Rang belgisi: {correct_text}\n\n"
             "Mos nomni tanlang:",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=InlineKeyboardMarkup(
+                keyboard
+            )
         )
+
         return
 
-    # ------------------------------------------------------
+    # ======================================================
     # CODE
-    # ------------------------------------------------------
+    # ======================================================
 
     if game == "code":
 
@@ -1166,7 +1620,8 @@ async def start_game(update, context, game):
         )
 
         code = "".join(
-            str(x) for x in digits
+            str(x)
+            for x in digits
         )
 
         context.user_data["game"] = {
@@ -1184,11 +1639,12 @@ async def start_game(update, context, game):
             "Kodni yozib yuboring.",
             parse_mode="HTML"
         )
+
         return
 
-    # ------------------------------------------------------
+    # ======================================================
     # KNOWLEDGE
-    # ------------------------------------------------------
+    # ======================================================
 
     if game == "knowledge":
 
@@ -1216,18 +1672,28 @@ async def start_game(update, context, game):
             "📚 <b>Bilim savoli</b>\n\n"
             f"{question}",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=InlineKeyboardMarkup(
+                keyboard
+            )
         )
+
         return
 
-    # ------------------------------------------------------
+    # ======================================================
     # SPEED
-    # ------------------------------------------------------
+    # ======================================================
 
     if game == "speed":
 
-        a = random.randint(10, 30)
-        b = random.randint(5, 20)
+        a = random.randint(
+            10,
+            30
+        )
+
+        b = random.randint(
+            5,
+            20
+        )
 
         answer = a + b
 
@@ -1243,6 +1709,7 @@ async def start_game(update, context, game):
             "Javobni imkon qadar tez yuboring!",
             parse_mode="HTML"
         )
+
         return
 
 
@@ -1250,46 +1717,78 @@ async def start_game(update, context, game):
 # GAME ANSWERS
 # ==========================================================
 
-async def process_game_answer(update, context):
+async def process_game_answer(
+    update,
+    context
+):
 
     user_id = update.effective_user.id
-    game = context.user_data.get("game")
 
+    game = context.user_data.get(
+        "game"
+    )
+
+    # O'yin bo'lmasa admin actionni boshqa handlerga beramiz
     if not game:
+        return
+
+    if not update.message or not update.message.text:
         return
 
     answer_text = update.message.text.strip()
 
-    game_type = game.get("type")
+    game_type = game.get(
+        "type"
+    )
+
     correct = False
 
     # NUMBER
     if game_type == "number":
 
         try:
-            value = int(answer_text)
+
+            value = int(
+                answer_text
+            )
+
         except ValueError:
+
             await update.message.reply_text(
                 "❌ Faqat raqam yuboring."
             )
+
             return
 
         game["tries"] += 1
 
         if value == game["number"]:
+
             correct = True
 
         elif game["tries"] >= 7:
-            await game_result(user_id, False)
-            context.user_data.pop("game", None)
+
+            await game_result(
+                user_id,
+                False
+            )
+
+            context.user_data.pop(
+                "game",
+                None
+            )
 
             await update.message.reply_text(
                 f"❌ Yutqazdingiz.\n\n"
                 f"🔐 To‘g‘ri son: {game['number']}"
             )
+
+            await save_database()
+
             return
 
         else:
+
             if value < game["number"]:
                 hint = "⬆️ Kattaroq son."
             else:
@@ -1297,14 +1796,17 @@ async def process_game_answer(update, context):
 
             await update.message.reply_text(
                 f"{hint}\n"
-                f"🎯 Qolgan urinish: {7 - game['tries']}"
+                f"🎯 Qolgan urinish: "
+                f"{7 - game['tries']}"
             )
+
             return
 
     # WORD
     elif game_type == "word":
 
         if answer_text.lower() == game["correct_word"]:
+
             correct = True
 
     # MATH / CODE / SPEED
@@ -1314,13 +1816,19 @@ async def process_game_answer(update, context):
         "speed"
     ):
 
-        if answer_text == str(game["correct"]):
+        if answer_text == str(
+            game["correct"]
+        ):
+
             correct = True
 
     if correct:
 
         reward = float(
-            game.get("reward", GAME_REWARD)
+            game.get(
+                "reward",
+                GAME_REWARD
+            )
         )
 
         await change_points(
@@ -1363,14 +1871,20 @@ async def process_game_answer(update, context):
             parse_mode="HTML"
         )
 
+    await save_database()
+
 
 # ==========================================================
 # CALLBACK
 # ==========================================================
 
-async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def menu(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
     q = update.callback_query
+
     await q.answer()
 
     user = q.from_user
@@ -1378,10 +1892,15 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await add_user(
         user.id,
-        user.username
+        user.username,
+        None,
+        context.bot
     )
 
-    # Obunani tekshirish tugmasi
+    # ======================================================
+    # CHECK SUB
+    # ======================================================
+
     if data == "check_sub":
 
         if await subscribed(
@@ -1408,7 +1927,10 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
-    # Admin obunani bypass qiladi
+    # ======================================================
+    # SUBSCRIPTION
+    # ======================================================
+
     if user.id != ADMIN_ID:
 
         if not await subscribed(
@@ -1420,21 +1942,33 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 update,
                 context
             )
+
             return
 
+    # ======================================================
     # HOME
+    # ======================================================
+
     if data == "home":
 
+        total_users = await get_total_users()
+
         await q.message.reply_text(
-            "🏠 <b>Asosiy menyu</b>",
+            "🏠 <b>Asosiy menyu</b>\n\n"
+            f"👥 Jami foydalanuvchilar: "
+            f"<b>{format_count(total_users)}</b>",
             parse_mode="HTML",
             reply_markup=main_menu(
                 user.id == ADMIN_ID
             )
         )
+
         return
 
+    # ======================================================
     # BUY
+    # ======================================================
+
     if data == "buy":
 
         keyboard = [
@@ -1492,11 +2026,17 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "⭐ <b>STARS OLISH</b>\n\n"
             "Kerakli Stars paketini tanlang:",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=InlineKeyboardMarkup(
+                keyboard
+            )
         )
+
         return
 
+    # ======================================================
     # BUY PACKAGE
+    # ======================================================
+
     if data.startswith("buy_"):
 
         amount = data.replace(
@@ -1518,15 +2058,30 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ]
             ])
         )
+
         return
 
+    # ======================================================
     # BALANCE
+    # ======================================================
+
     if data == "balance":
 
-        row = get_user(user.id)
+        row = get_user(
+            user.id
+        )
 
-        points = row[2] if row else 0
-        referrals = row[5] if row else 0
+        points = (
+            row[2]
+            if row
+            else 0
+        )
+
+        referrals = (
+            row[5]
+            if row
+            else 0
+        )
 
         await q.message.reply_text(
             "💰 <b>BALANS</b>\n\n"
@@ -1536,15 +2091,23 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "bo‘limiga kiring.",
             parse_mode="HTML"
         )
+
         return
 
+    # ======================================================
     # PROFILE
+    # ======================================================
+
     if data == "profile":
 
-        row = get_user(user.id)
+        row = get_user(
+            user.id
+        )
 
         if not row:
             return
+
+        total_users = await get_total_users()
 
         await q.message.reply_text(
             "👤 <b>PROFIL</b>\n\n"
@@ -1553,12 +2116,18 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"⭐ Stars: <b>{row[2]:.2f}</b>\n"
             f"🎮 O‘yinlar: <b>{row[3]}</b>\n"
             f"🏆 G‘alabalar: <b>{row[4]}</b>\n"
-            f"👥 Referallar: <b>{row[5]}</b>",
+            f"👥 Referallar: <b>{row[5]}</b>\n\n"
+            f"👥 Botdagi jami userlar: "
+            f"<b>{format_count(total_users)}</b>",
             parse_mode="HTML"
         )
+
         return
 
+    # ======================================================
     # REFERRAL
+    # ======================================================
+
     if data == "ref":
 
         bot_info = await context.bot.get_me()
@@ -1568,21 +2137,33 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"?start={user.id}"
         )
 
-        row = get_user(user.id)
-        refs = row[5] if row else 0
+        row = get_user(
+            user.id
+        )
+
+        refs = (
+            row[5]
+            if row
+            else 0
+        )
 
         await q.message.reply_text(
             "👥 <b>REFERAL TIZIMI</b>\n\n"
-            f"Har bir taklif uchun: ⭐ <b>{REFERRAL_REWARD:g}</b>\n"
+            f"Har bir taklif uchun: ⭐ "
+            f"<b>{REFERRAL_REWARD:g}</b>\n"
             f"Sizning referallaringiz: <b>{refs}</b>\n\n"
             "🔗 Sizning havolangiz:\n"
             f"<code>{link}</code>\n\n"
             "Havolani do‘stlaringizga yuboring.",
             parse_mode="HTML"
         )
+
         return
 
+    # ======================================================
     # TASKS
+    # ======================================================
+
     if data == "tasks":
 
         con = db()
@@ -1603,6 +2184,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await q.message.reply_text(
                 "🎁 Hozircha topshiriqlar yo‘q."
             )
+
             return
 
         for task_id, text, reward, url in tasks:
@@ -1627,22 +2209,30 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"{text}\n\n"
                 f"💰 Mukofot: ⭐ <b>{reward:g}</b>",
                 parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup(keyboard)
+                reply_markup=InlineKeyboardMarkup(
+                    keyboard
+                )
             )
 
         return
 
+    # ======================================================
     # TASK DONE
+    # ======================================================
+
     if data.startswith("taskdone_"):
 
         try:
+
             task_id = int(
                 data.replace(
                     "taskdone_",
                     ""
                 )
             )
+
         except ValueError:
+
             return
 
         con = db()
@@ -1652,18 +2242,25 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         SELECT reward
         FROM tasks
         WHERE id=?
-        """, (task_id,))
+        """, (
+            task_id,
+        ))
 
         task = cur.fetchone()
 
         if not task:
+
             con.close()
+
             await q.message.reply_text(
                 "❌ Topshiriq topilmadi."
             )
+
             return
 
-        reward = float(task[0])
+        reward = float(
+            task[0]
+        )
 
         cur.execute("""
         SELECT 1
@@ -1677,10 +2274,13 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         already = cur.fetchone()
 
         if already:
+
             con.close()
+
             await q.message.reply_text(
                 "⚠️ Bu topshiriq uchun Stars olgansiz."
             )
+
             return
 
         cur.execute("""
@@ -1712,9 +2312,13 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         await save_database()
+
         return
 
+    # ======================================================
     # RATING
+    # ======================================================
+
     if data == "rating":
 
         con = db()
@@ -1734,12 +2338,19 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         text = "🏆 <b>TOP 10 REYTING</b>\n\n"
 
         if not rows:
+
             text += "Hali foydalanuvchilar yo‘q."
+
         else:
-            for i, (username, points) in enumerate(
+
+            for i, (
+                username,
+                points
+            ) in enumerate(
                 rows,
                 start=1
             ):
+
                 name = (
                     f"@{username}"
                     if username
@@ -1755,18 +2366,29 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text,
             parse_mode="HTML"
         )
+
         return
 
+    # ======================================================
     # WITHDRAW
+    # ======================================================
+
     if data == "withdraw":
 
-        row = get_user(user.id)
+        row = get_user(
+            user.id
+        )
 
         if not row:
             return
 
-        points = float(row[2])
-        referrals = int(row[5])
+        points = float(
+            row[2]
+        )
+
+        referrals = int(
+            row[5]
+        )
 
         if points < MIN_WITHDRAW:
 
@@ -1776,6 +2398,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Sizda: ⭐ <b>{points:.2f}</b>",
                 parse_mode="HTML"
             )
+
             return
 
         if referrals < MIN_REFERRALS:
@@ -1786,6 +2409,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Sizda: <b>{referrals}</b>",
                 parse_mode="HTML"
             )
+
             return
 
         con = db()
@@ -1796,7 +2420,9 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         FROM withdrawals
         WHERE user_id=?
         AND status='pending'
-        """, (user.id,))
+        """, (
+            user.id,
+        ))
 
         pending = cur.fetchone()
 
@@ -1808,12 +2434,12 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "⏳ Sizda allaqachon kutayotgan "
                 "yechish so‘rovi bor."
             )
+
             return
 
         con = db()
         cur = con.cursor()
 
-        # 200 Stars yechiladi
         cur.execute("""
         UPDATE users
         SET points=points-?
@@ -1826,11 +2452,13 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ))
 
         if cur.rowcount == 0:
+
             con.close()
 
             await q.message.reply_text(
                 "❌ Balans yetarli emas."
             )
+
             return
 
         cur.execute("""
@@ -1871,6 +2499,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ])
 
             try:
+
                 await context.bot.send_message(
                     ADMIN_ID,
                     "💸 <b>Yangi YECHISH SO‘ROVI</b>\n\n"
@@ -1881,27 +2510,39 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     parse_mode="HTML",
                     reply_markup=keyboard
                 )
+
             except TelegramError as e:
+
                 log.error(
                     "Admin notification error: %s",
                     e
                 )
 
         await save_database()
+
         return
 
+    # ======================================================
     # APPROVE
+    # ======================================================
+
     if data.startswith("approve_"):
 
         if user.id != ADMIN_ID:
             return
 
-        withdrawal_id = int(
-            data.replace(
-                "approve_",
-                ""
+        try:
+
+            withdrawal_id = int(
+                data.replace(
+                    "approve_",
+                    ""
+                )
             )
-        )
+
+        except ValueError:
+
+            return
 
         con = db()
         cur = con.cursor()
@@ -1910,33 +2551,41 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         SELECT user_id, amount, status
         FROM withdrawals
         WHERE id=?
-        """, (withdrawal_id,))
+        """, (
+            withdrawal_id,
+        ))
 
         withdrawal = cur.fetchone()
 
         if not withdrawal:
+
             con.close()
 
             await q.message.reply_text(
                 "❌ So‘rov topilmadi."
             )
+
             return
 
         target_user, amount, status = withdrawal
 
         if status != "pending":
+
             con.close()
 
             await q.message.reply_text(
                 "⚠️ Bu so‘rov allaqachon ko‘rib chiqilgan."
             )
+
             return
 
         cur.execute("""
         UPDATE withdrawals
         SET status='approved'
         WHERE id=?
-        """, (withdrawal_id,))
+        """, (
+            withdrawal_id,
+        ))
 
         con.commit()
         con.close()
@@ -1946,6 +2595,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         try:
+
             await context.bot.send_message(
                 target_user,
                 "🎉 <b>Yechish so‘rovingiz tasdiqlandi!</b>\n\n"
@@ -1953,24 +2603,35 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Admin tomonidan tasdiqlandi.",
                 parse_mode="HTML"
             )
+
         except TelegramError:
             pass
 
         await save_database()
+
         return
 
+    # ======================================================
     # REJECT
+    # ======================================================
+
     if data.startswith("reject_"):
 
         if user.id != ADMIN_ID:
             return
 
-        withdrawal_id = int(
-            data.replace(
-                "reject_",
-                ""
+        try:
+
+            withdrawal_id = int(
+                data.replace(
+                    "reject_",
+                    ""
+                )
             )
-        )
+
+        except ValueError:
+
+            return
 
         con = db()
         cur = con.cursor()
@@ -1979,33 +2640,41 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         SELECT user_id, amount, status
         FROM withdrawals
         WHERE id=?
-        """, (withdrawal_id,))
+        """, (
+            withdrawal_id,
+        ))
 
         withdrawal = cur.fetchone()
 
         if not withdrawal:
+
             con.close()
 
             await q.message.reply_text(
                 "❌ So‘rov topilmadi."
             )
+
             return
 
         target_user, amount, status = withdrawal
 
         if status != "pending":
+
             con.close()
 
             await q.message.reply_text(
                 "⚠️ Bu so‘rov allaqachon ko‘rib chiqilgan."
             )
+
             return
 
         cur.execute("""
         UPDATE withdrawals
         SET status='rejected'
         WHERE id=?
-        """, (withdrawal_id,))
+        """, (
+            withdrawal_id,
+        ))
 
         cur.execute("""
         UPDATE users
@@ -2025,19 +2694,25 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         try:
+
             await context.bot.send_message(
                 target_user,
                 "❌ <b>Yechish so‘rovingiz rad etildi.</b>\n\n"
                 f"⭐ {amount:g} Stars balansingizga qaytarildi.",
                 parse_mode="HTML"
             )
+
         except TelegramError:
             pass
 
         await save_database()
+
         return
 
+    # ======================================================
     # GAMES
+    # ======================================================
+
     if data == "games":
 
         await q.message.reply_text(
@@ -2048,9 +2723,13 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="HTML",
             reply_markup=games_menu()
         )
+
         return
 
+    # ======================================================
     # START GAME
+    # ======================================================
+
     if data.startswith("game_"):
 
         game = data.replace(
@@ -2071,9 +2750,13 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context,
             game
         )
+
         return
 
-    # QUIZ ANSWER
+    # ======================================================
+    # QUIZ
+    # ======================================================
+
     if data.startswith("answer_"):
 
         game = context.user_data.get(
@@ -2084,13 +2767,16 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         try:
+
             selected = int(
                 data.replace(
                     "answer_",
                     ""
                 )
             )
+
         except ValueError:
+
             return
 
         if selected == game["correct"]:
@@ -2135,9 +2821,13 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
 
         await save_database()
+
         return
 
-    # LOGIC ANSWER
+    # ======================================================
+    # LOGIC
+    # ======================================================
+
     if data.startswith("logic_"):
 
         game = context.user_data.get(
@@ -2147,12 +2837,18 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not game:
             return
 
-        selected = int(
-            data.replace(
-                "logic_",
-                ""
+        try:
+
+            selected = int(
+                data.replace(
+                    "logic_",
+                    ""
+                )
             )
-        )
+
+        except ValueError:
+
+            return
 
         if selected == game["correct"]:
 
@@ -2191,9 +2887,13 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         await save_database()
+
         return
 
+    # ======================================================
     # TARGET
+    # ======================================================
+
     if data.startswith("target_"):
 
         game = context.user_data.get(
@@ -2203,14 +2903,22 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not game:
             return
 
-        selected = int(
-            data.replace(
-                "target_",
-                ""
-            )
-        )
+        try:
 
-        correct = selected == game["correct"]
+            selected = int(
+                data.replace(
+                    "target_",
+                    ""
+                )
+            )
+
+        except ValueError:
+
+            return
+
+        correct = (
+            selected == game["correct"]
+        )
 
         if correct:
 
@@ -2249,9 +2957,13 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         await save_database()
+
         return
 
+    # ======================================================
     # ATTENTION
+    # ======================================================
+
     if data.startswith("attention_"):
 
         game = context.user_data.get(
@@ -2261,12 +2973,18 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not game:
             return
 
-        selected = int(
-            data.replace(
-                "attention_",
-                ""
+        try:
+
+            selected = int(
+                data.replace(
+                    "attention_",
+                    ""
+                )
             )
-        )
+
+        except ValueError:
+
+            return
 
         if selected == game["correct"]:
 
@@ -2305,9 +3023,13 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         await save_database()
+
         return
 
+    # ======================================================
     # COLOR
+    # ======================================================
+
     if data.startswith("color_"):
 
         game = context.user_data.get(
@@ -2359,9 +3081,13 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         await save_database()
+
         return
 
+    # ======================================================
     # KNOWLEDGE
+    # ======================================================
+
     if data.startswith("knowledge_"):
 
         game = context.user_data.get(
@@ -2371,12 +3097,18 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not game:
             return
 
-        selected = int(
-            data.replace(
-                "knowledge_",
-                ""
+        try:
+
+            selected = int(
+                data.replace(
+                    "knowledge_",
+                    ""
+                )
             )
-        )
+
+        except ValueError:
+
+            return
 
         if selected == game["correct"]:
 
@@ -2415,9 +3147,13 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         await save_database()
+
         return
 
+    # ======================================================
     # CHOICE
+    # ======================================================
+
     if data.startswith("choice_"):
 
         game = context.user_data.get(
@@ -2432,7 +3168,6 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ""
         )
 
-        # Bu o‘yinda to‘g‘ri variant context'da saqlangan
         if selected == game["correct"]:
 
             reward = game["reward"]
@@ -2470,9 +3205,13 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         await save_database()
+
         return
 
+    # ======================================================
     # OTHER GAMES
+    # ======================================================
+
     if data == "other_games":
 
         await q.message.reply_text(
@@ -2481,9 +3220,13 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "keyingi versiyalarda kengaytirish mumkin.",
             parse_mode="HTML"
         )
+
         return
 
+    # ======================================================
     # ADMIN
+    # ======================================================
+
     if data == "admin":
 
         if user.id != ADMIN_ID:
@@ -2531,11 +3274,17 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.message.reply_text(
             "⚙️ <b>ADMIN PANEL</b>",
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=InlineKeyboardMarkup(
+                keyboard
+            )
         )
+
         return
 
+    # ======================================================
     # ADMIN STATS
+    # ======================================================
+
     if data == "admin_stats":
 
         if user.id != ADMIN_ID:
@@ -2547,23 +3296,33 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         cur.execute(
             "SELECT COUNT(*) FROM users"
         )
+
         users_count = cur.fetchone()[0]
 
         cur.execute(
             "SELECT SUM(points) FROM users"
         )
-        total_points = cur.fetchone()[0] or 0
+
+        total_points = (
+            cur.fetchone()[0]
+            or 0
+        )
 
         cur.execute(
             "SELECT SUM(referrals) FROM users"
         )
-        referrals = cur.fetchone()[0] or 0
+
+        referrals = (
+            cur.fetchone()[0]
+            or 0
+        )
 
         cur.execute("""
         SELECT COUNT(*)
         FROM withdrawals
         WHERE status='pending'
         """)
+
         pending = cur.fetchone()[0]
 
         cur.execute("""
@@ -2571,53 +3330,63 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         FROM bot_stats
         WHERE id=1
         """)
-        total_since_start = cur.fetchone()[0] or users_count
+
+        row = cur.fetchone()
+
+        total_since_start = (
+            row[0]
+            if row
+            else users_count
+        )
 
         con.close()
 
         await q.message.reply_text(
             "📊 <b>BOT STATISTIKASI</b>\n\n"
-            f"👥 Jami userlar: <b>{users_count}</b>\n"
-            f"📈 Bot ochilgandan beri: <b>{total_since_start}</b>\n"
+            f"👥 Hozirgi userlar: "
+            f"<b>{format_count(users_count)}</b>\n"
+            f"📈 Bot ochilgandan beri: "
+            f"<b>{format_count(total_since_start)}</b>\n"
             f"⭐ Jami Stars: <b>{total_points:.2f}</b>\n"
             f"👥 Jami referallar: <b>{referrals}</b>\n"
-            f"💸 Kutilayotgan yechish: <b>{pending}</b>",
+            f"💸 Kutilayotgan yechish: "
+            f"<b>{pending}</b>",
             parse_mode="HTML"
         )
+
         return
 
+    # ======================================================
     # ADMIN USERS
+    # ======================================================
+
     if data == "admin_users":
 
         if user.id != ADMIN_ID:
             return
 
-        con = db()
-        cur = con.cursor()
-
-        cur.execute("""
-        SELECT COUNT(*)
-        FROM users
-        """)
-
-        count = cur.fetchone()[0]
-
-        con.close()
+        count = await get_total_users()
 
         await q.message.reply_text(
-            f"👥 <b>Jami foydalanuvchilar:</b> "
-            f"<b>{count}</b>",
+            f"👥 <b>Bot ochilgandan beri jami:</b>\n\n"
+            f"👥 <b>{format_count(count)} ta foydalanuvchi</b>",
             parse_mode="HTML"
         )
+
         return
 
+    # ======================================================
     # ADMIN BROADCAST
+    # ======================================================
+
     if data == "admin_broadcast":
 
         if user.id != ADMIN_ID:
             return
 
-        context.user_data["admin_action"] = "broadcast"
+        context.user_data[
+            "admin_action"
+        ] = "broadcast"
 
         await q.message.reply_text(
             "📢 <b>Broadcast</b>\n\n"
@@ -2625,15 +3394,21 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "shu yerga yuboring.",
             parse_mode="HTML"
         )
+
         return
 
+    # ======================================================
     # ADMIN ADD TASK
+    # ======================================================
+
     if data == "admin_addtask":
 
         if user.id != ADMIN_ID:
             return
 
-        context.user_data["admin_action"] = "add_task"
+        context.user_data[
+            "admin_action"
+        ] = "add_task"
 
         await q.message.reply_text(
             "➕ <b>TOPSHIRIQ QO‘SHISH</b>\n\n"
@@ -2643,9 +3418,13 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "<code>Kanalga obuna bo‘ling | 5 | https://t.me/example</code>",
             parse_mode="HTML"
         )
+
         return
 
+    # ======================================================
     # ADMIN TASK LIST
+    # ======================================================
+
     if data == "admin_tasks":
 
         if user.id != ADMIN_ID:
@@ -2665,14 +3444,21 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         con.close()
 
         if not rows:
+
             await q.message.reply_text(
                 "📋 Hali topshiriqlar yo‘q."
             )
+
             return
 
         text = "📋 <b>TOPSHIRIQLAR</b>\n\n"
 
-        for task_id, task_text, reward, url in rows:
+        for (
+            task_id,
+            task_text,
+            reward,
+            url
+        ) in rows:
 
             text += (
                 f"#{task_id} — {task_text}\n"
@@ -2684,27 +3470,50 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text,
             parse_mode="HTML"
         )
+
         return
 
 
 # ==========================================================
-# ADMIN MESSAGE
+# ADMIN TEXT / BROADCAST / TASK
 # ==========================================================
 
-async def admin_message(update, context):
+async def admin_message(
+    update,
+    context
+):
 
     user = update.effective_user
 
+    if not user:
+        return
+
     if user.id != ADMIN_ID:
+        return
+
+    if not update.message:
         return
 
     action = context.user_data.get(
         "admin_action"
     )
 
+    if not action:
+        return
+
+    # ======================================================
+    # BROADCAST
+    # ======================================================
+
     if action == "broadcast":
 
         text = update.message.text
+
+        if not text:
+            await update.message.reply_text(
+                "❌ Faqat matnli xabar yuboring."
+            )
+            return
 
         con = db()
         cur = con.cursor()
@@ -2726,7 +3535,9 @@ async def admin_message(update, context):
             f"📢 Xabar {len(users)} ta userga yuborilmoqda..."
         )
 
-        for (user_id,) in users:
+        for (
+            user_id,
+        ) in users:
 
             try:
 
@@ -2737,7 +3548,9 @@ async def admin_message(update, context):
 
                 sent += 1
 
-                await asyncio.sleep(0.04)
+                await asyncio.sleep(
+                    0.04
+                )
 
             except Forbidden:
 
@@ -2750,7 +3563,9 @@ async def admin_message(update, context):
                 UPDATE users
                 SET blocked=1
                 WHERE id=?
-                """, (user_id,))
+                """, (
+                    user_id,
+                ))
 
                 con.commit()
                 con.close()
@@ -2761,8 +3576,13 @@ async def admin_message(update, context):
                     e.retry_after
                 )
 
-            except TelegramError:
-                pass
+            except TelegramError as e:
+
+                log.error(
+                    "Broadcast error %s: %s",
+                    user_id,
+                    e
+                )
 
         context.user_data.pop(
             "admin_action",
@@ -2777,11 +3597,17 @@ async def admin_message(update, context):
         )
 
         await save_database()
+
         return
+
+    # ======================================================
+    # ADD TASK
+    # ======================================================
 
     if action == "add_task":
 
         try:
+
             parts = [
                 x.strip()
                 for x in update.message.text.split("|")
@@ -2797,13 +3623,17 @@ async def admin_message(update, context):
             if not text or not url:
                 raise ValueError
 
-        except ValueError:
+        except (
+            ValueError,
+            AttributeError
+        ):
 
             await update.message.reply_text(
                 "❌ Format noto‘g‘ri.\n\n"
                 "<code>MATN | REWARD | URL</code>",
                 parse_mode="HTML"
             )
+
             return
 
         con = db()
@@ -2838,6 +3668,45 @@ async def admin_message(update, context):
         )
 
         await save_database()
+
+        return
+
+
+# ==========================================================
+# TEXT ROUTER
+#
+# Bu yerda o'yin javobi va admin xabari birga boshqariladi.
+# ==========================================================
+
+async def text_router(
+    update,
+    context
+):
+
+    game = context.user_data.get(
+        "game"
+    )
+
+    if game:
+
+        await process_game_answer(
+            update,
+            context
+        )
+
+        return
+
+    action = context.user_data.get(
+        "admin_action"
+    )
+
+    if action:
+
+        await admin_message(
+            update,
+            context
+        )
+
         return
 
 
@@ -2845,7 +3714,10 @@ async def admin_message(update, context):
 # ERROR
 # ==========================================================
 
-async def error_handler(update, context):
+async def error_handler(
+    update,
+    context
+):
 
     error = context.error
 
@@ -2860,16 +3732,43 @@ async def error_handler(update, context):
 # POST INIT
 # ==========================================================
 
-async def post_init(application):
+async def post_init(
+    application
+):
 
+    # Avval database
     init_db()
 
+    # Bot profilidagi user sonini sinxronlash
+    await update_bot_user_count(
+        application.bot
+    )
+
+    # Background backup
     application.create_task(
         periodic_database_backup()
     )
 
+    # Ishga tushganda darhol backup
+    await save_database()
+
+    total = await get_total_users()
+
+    log.info(
+        "========================================"
+    )
+
     log.info(
         "Zerikdim Bot ishga tushdi."
+    )
+
+    log.info(
+        "Jami user: %s",
+        total
+    )
+
+    log.info(
+        "========================================"
     )
 
 
@@ -2877,11 +3776,20 @@ async def post_init(application):
 # POST SHUTDOWN
 # ==========================================================
 
-async def post_shutdown(application):
+async def post_shutdown(
+    application
+):
 
     try:
+
+        log.info(
+            "Bot yopilmoqda. Database backup..."
+        )
+
         await save_database()
+
     except Exception as e:
+
         log.error(
             "Shutdown backup error: %s",
             e
@@ -2895,11 +3803,13 @@ async def post_shutdown(application):
 def main():
 
     if not TOKEN:
+
         raise RuntimeError(
             "BOT_TOKEN topilmadi!"
         )
 
     if not ADMIN_ID:
+
         log.warning(
             "ADMIN_ID sozlanmagan."
         )
@@ -2912,6 +3822,7 @@ def main():
         .build()
     )
 
+    # START
     application.add_handler(
         CommandHandler(
             "start",
@@ -2919,23 +3830,19 @@ def main():
         )
     )
 
+    # CALLBACK
     application.add_handler(
         CallbackQueryHandler(
             menu
         )
     )
 
+    # Barcha oddiy textlar bitta router orqali
+    # O'yin + Admin broadcast/task
     application.add_handler(
         MessageHandler(
             filters.TEXT & ~filters.COMMAND,
-            process_game_answer
-        )
-    )
-
-    application.add_handler(
-        MessageHandler(
-            filters.ALL,
-            admin_message
+            text_router
         )
     )
 
@@ -2949,4 +3856,5 @@ def main():
 
 
 if __name__ == "__main__":
+
     main()
