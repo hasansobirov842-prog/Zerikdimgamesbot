@@ -37,13 +37,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Database borligini tekshirish
+      - name: Database tekshirish
         run: |
           if [ -f zerikdim.db ]; then
-            echo "✅ zerikdim.db topildi"
+            echo "✅ Eski database topildi"
             ls -lh zerikdim.db
           else
-            echo "⚠️ zerikdim.db hali yo'q"
+            echo "⚠️ Database topilmadi, yangisi yaratiladi"
           fi
 
       - name: Zerikdim botni ishga tushirish
@@ -56,24 +56,27 @@ jobs:
       - name: Database saqlash
         if: always()
         run: |
-          if [ -f zerikdim.db ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-            git add -f zerikdim.db
-
-            if git diff --cached --quiet; then
-              echo "Database o'zgarmagan."
-            else
-              git commit -m "Save Zerikdim database"
-
-              git fetch origin main
-              git rebase origin/main
-
-              git push origin HEAD:main
-
-              echo "✅ Database GitHub'ga saqlandi."
-            fi
-          else
-            echo "⚠️ zerikdim.db topilmadi."
+          if [ ! -f zerikdim.db ]; then
+            echo "⚠️ zerikdim.db topilmadi"
+            exit 0
           fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          echo "📦 Database saqlanmoqda..."
+
+          git fetch origin main
+
+          git add -f zerikdim.db
+
+          if git diff --cached --quiet; then
+            echo "ℹ️ Database o'zgarmagan."
+            exit 0
+          fi
+
+          git commit -m "Save Zerikdim database"
+
+          git push origin HEAD:main
+
+          echo "✅ Database va statistika saqlandi!"
