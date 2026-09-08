@@ -8,22 +8,24 @@ on:
     paths-ignore:
       - "zerikdim.db"
 
-concurrency:
-  group: zerikdim-bot
-  cancel-in-progress: false
-
 permissions:
   contents: write
+
+concurrency:
+  group: zerikdim-bot
+  cancel-in-progress: true
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 345
 
     steps:
       - name: Kodni olish
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: true
 
       - name: Python o‘rnatish
         uses: actions/setup-python@v5
@@ -35,9 +37,38 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Database borligini tekshirish
+        run: |
+          if [ -f zerikdim.db ]; then
+            echo "✅ zerikdim.db topildi"
+            ls -lh zerikdim.db
+          else
+            echo "⚠️ zerikdim.db hali yo‘q"
+          fi
+
       - name: Zerikdim botni ishga tushirish
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           ADMIN_ID: ${{ secrets.ADMIN_ID }}
         run: |
           python bot.py
+
+      - name: Database saqlash
+        if: always()
+        run: |
+          if [ -f zerikdim.db ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            git add -f zerikdim.db
+
+            if git diff --cached --quiet; then
+              echo "Database o‘zgarishsiz"
+            else
+              git commit -m "Save Zerikdim database"
+              git push origin main
+              echo "✅ Database GitHub'ga saqlandi"
+            fi
+          else
+            echo "⚠️ zerikdim.db topilmadi"
+          fi
