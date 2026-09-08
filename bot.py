@@ -18,19 +18,14 @@ from telegram.ext import (
     filters,
 )
 
-# ==========================================================
+# =========================================================
 # SOZLAMALAR
-# ==========================================================
+# =========================================================
 
 TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 DB_FILE = "zerikdim.db"
-
-# ==========================================================
-# YANGI HOMIY KANAL
-# 150 ta odamga yetganda majburiy obuna avtomatik o'chadi
-# ==========================================================
 
 SPONSOR_CHANNEL = "@premyumstarstekin"
 SPONSOR_URL = "https://t.me/premyumstarstekin"
@@ -49,147 +44,95 @@ GAME_COOLDOWN = 30
 PAGE_SIZE = 10
 
 logging.basicConfig(
-    format="%(asctime)s - %(levelname)s - %(message)s",
-    level=logging.INFO
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
 )
 
-log = logging.getLogger("zerikdim")
+logger = logging.getLogger(__name__)
 
 
-# ==========================================================
+# =========================================================
 # O'YINLAR
-# ==========================================================
+# =========================================================
 
-GAMES = [
-    ("🧠 Tezkor savol", "quiz"),
-    ("🔢 Sonni top", "number"),
-    ("⚡ Tez tanla", "choice"),
-    ("🧩 Mantiq", "logic"),
-    ("🎯 Nishon", "target"),
-    ("🔤 So‘zni top", "word"),
-    ("🧮 Hisobla", "math"),
-    ("👀 Diqqat", "attention"),
-    ("🎨 Rangni top", "color"),
-    ("🔐 Kodni top", "code"),
-    ("📚 Bilim", "knowledge"),
-    ("⏱ Tezlik", "speed"),
-]
+GAMES = {
+    "quiz": "🧠 Viktorina",
+    "number": "🔢 Son topish",
+    "choice": "🎯 Tanlov",
+    "logic": "🧩 Mantiq",
+    "target": "🎯 Nishon",
+    "word": "🔤 So'z topish",
+    "math": "➗ Matematika",
+    "attention": "👀 Diqqat",
+    "color": "🎨 Rang",
+    "code": "🔐 Kod",
+    "knowledge": "📚 Bilim",
+    "speed": "⚡ Tezlik",
+}
 
 QUIZ = [
-    (
-        "O‘zbekiston Konstitutsiyasi qaysi yilda qabul qilingan?",
-        ["1991", "1992", "1993", "1994"],
-        1
-    ),
-    (
-        "1 dan 20 gacha bo‘lgan sonlar yig‘indisi nechaga teng?",
-        ["190", "200", "210", "220"],
-        2
-    ),
-    (
-        "Yer Quyosh atrofini taxminan necha kunda aylanib chiqadi?",
-        ["180", "265", "365", "400"],
-        2
-    ),
-    (
-        "Agar 3 ta qalam 15 000 so‘m bo‘lsa, 7 ta qalam qancha?",
-        ["25 000", "30 000", "35 000", "40 000"],
-        2
-    ),
-    (
-        "Eng katta okean qaysi?",
-        ["Atlantika", "Hind", "Tinch", "Shimoliy Muz"],
-        2
-    ),
-    (
-        "2^5 nechaga teng?",
-        ["16", "24", "32", "64"],
-        2
-    ),
-    (
-        "1 kilometr necha metr?",
-        ["100", "500", "1000", "1500"],
-        2
-    ),
-    (
-        "12 × 8 − 17 nechaga teng?",
-        ["69", "79", "89", "97"],
-        1
-    ),
+    ("O'zbekiston poytaxti qaysi?", ["Toshkent", "Samarqand", "Buxoro", "Andijon"], "Toshkent"),
+    ("2 + 2 nechchi?", ["3", "4", "5", "6"], "4"),
+    ("Yerning tabiiy yo'ldoshi nima?", ["Quyosh", "Oy", "Mars", "Yulduz"], "Oy"),
+    ("Haftada nechta kun bor?", ["5", "6", "7", "8"], "7"),
+    ("O'zbekiston pul birligi nima?", ["Dollar", "So'm", "Rubl", "Euro"], "So'm"),
+    ("Bir yilda nechta oy bor?", ["10", "11", "12", "13"], "12"),
+    ("5 × 5 nechchi?", ["20", "25", "30", "35"], "25"),
+    ("Suvning kimyoviy formulasi?", ["CO2", "O2", "H2O", "NaCl"], "H2O"),
 ]
 
 LOGIC_QUESTIONS = [
-    (
-        "Ketma-ketlikni davom ettir: 2, 6, 12, 20, 30, ?",
-        ["36", "40", "42", "44"],
-        2
-    ),
-    (
-        "5, 10, 20, 40, ?",
-        ["60", "70", "80", "90"],
-        2
-    ),
-    (
-        "1, 4, 9, 16, 25, ?",
-        ["30", "32", "36", "49"],
-        2
-    ),
-    (
-        "100, 90, 81, 73, ?",
-        ["64", "66", "67", "68"],
-        1
-    ),
-    (
-        "3, 9, 27, 81, ?",
-        ["162", "243", "324", "729"],
-        1
-    ),
+    ("3, 6, 9, 12, ?", ["14", "15", "16", "18"], "15"),
+    ("2, 4, 8, 16, ?", ["24", "30", "32", "36"], "32"),
+    ("1, 4, 9, 16, ?", ["20", "24", "25", "26"], "25"),
+    ("10, 20, 30, 40, ?", ["45", "50", "55", "60"], "50"),
+    ("5, 10, 20, 40, ?", ["50", "60", "70", "80"], "80"),
 ]
 
 WORDS = [
     ("HSTOAN", "TOSHAN"),
     ("KTOBII", "KITOBI"),
-    ("MRAKTA", "MARKET"),
-    ("LQAMA", "QALAM"),
-    ("GOLBA", "BOGLA"),
-    ("TNAEK", "KENTA"),
-    ("DORS", "DORS"),
+    ("HOMAL", "OLMAH"),
+    ("NOML", "NOLM"),
+    ("TOSHKENT", "TOSHKENT"),
+    ("DO'ST", "DO'ST"),
+    ("YULDUZ", "YULDUZ"),
 ]
 
 COLORS = [
-    ("🔴 QIZIL", "qizil"),
-    ("🔵 KO‘K", "ko‘k"),
-    ("🟢 YASHIL", "yashil"),
-    ("🟡 SARIQ", "sariq"),
+    ("🔴", "Qizil"),
+    ("🟢", "Yashil"),
+    ("🔵", "Ko'k"),
+    ("🟡", "Sariq"),
 ]
 
 KNOWLEDGE = [
     (
-        "Dunyodagi eng katta qit’a qaysi?",
-        ["Osiyo", "Afrika", "Yevropa", "Avstraliya"],
-        0
+        "Dunyodagi eng katta okean qaysi?",
+        ["Tinch", "Atlantika", "Hind", "Shimoliy Muz"],
+        "Tinch",
     ),
     (
-        "Suvning kimyoviy formulasi?",
-        ["CO2", "H2O", "O2", "NaCl"],
-        1
+        "O'zbekistonda nechta viloyat bor?",
+        ["10", "12", "14", "16"],
+        "12",
     ),
     (
-        "Python dasturlash tilining belgisi ko‘proq nima bilan bog‘liq?",
-        ["Ilon", "Qush", "Sher", "Baliq"],
-        0
+        "Quyosh qaysi turdagi osmon jismi?",
+        ["Sayyora", "Yulduz", "Yo'ldosh", "Asteroid"],
+        "Yulduz",
     ),
     (
-        "Bir sutkada nechta soat bor?",
-        ["12", "18", "24", "48"],
-        2
+        "Eng kichik tub son qaysi?",
+        ["0", "1", "2", "3"],
+        "2",
     ),
 ]
 
 
-# ==========================================================
-# YORDAMCHI
-# ==========================================================
+# =========================================================
+# YORDAMCHI FUNKSIYALAR
+# =========================================================
 
 def now():
     return datetime.now(timezone.utc).isoformat()
@@ -205,308 +148,205 @@ def format_count(number):
     return f"{int(number):,}".replace(",", " ")
 
 
-# ==========================================================
+# =========================================================
 # DATABASE
-# ==========================================================
+# =========================================================
 
 def init_db():
-
     con = db()
     cur = con.cursor()
 
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS users(
-        id INTEGER PRIMARY KEY,
-        username TEXT,
-        points REAL DEFAULT 0,
-        games INTEGER DEFAULT 0,
-        wins INTEGER DEFAULT 0,
-        referrals INTEGER DEFAULT 0,
-        referred_by INTEGER,
-        last_seen TEXT,
-        blocked INTEGER DEFAULT 0,
-        referral_rewarded INTEGER DEFAULT 0
-    )
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY,
+            username TEXT,
+            points REAL DEFAULT 0,
+            games INTEGER DEFAULT 0,
+            wins INTEGER DEFAULT 0,
+            referrals INTEGER DEFAULT 0,
+            referred_by INTEGER DEFAULT NULL,
+            last_seen TEXT,
+            blocked INTEGER DEFAULT 0,
+            referral_rewarded INTEGER DEFAULT 0
+        )
     """)
 
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS withdrawals(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        amount REAL,
-        status TEXT DEFAULT 'pending',
-        created_at TEXT
-    )
+        CREATE TABLE IF NOT EXISTS withdrawals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            amount REAL,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT
+        )
     """)
 
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS tasks(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        text TEXT,
-        reward REAL,
-        url TEXT
-    )
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            text TEXT,
+            reward REAL,
+            url TEXT
+        )
     """)
 
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS task_claims(
-        user_id INTEGER,
-        task_id INTEGER,
-        created_at TEXT,
-        PRIMARY KEY(user_id, task_id)
-    )
+        CREATE TABLE IF NOT EXISTS task_claims (
+            user_id INTEGER,
+            task_id INTEGER,
+            created_at TEXT,
+            PRIMARY KEY(user_id, task_id)
+        )
     """)
 
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS bot_stats(
-        id INTEGER PRIMARY KEY CHECK(id=1),
-        started_at TEXT,
-        total_users INTEGER DEFAULT 0
-    )
-    """)
-
-    # ======================================================
-    # HOMIY KANAL HOLATI
-    # ======================================================
-
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS sponsor_settings(
-        id INTEGER PRIMARY KEY CHECK(id=1),
-        active INTEGER DEFAULT 1,
-        disabled_at TEXT
-    )
+        CREATE TABLE IF NOT EXISTS bot_stats (
+            id INTEGER PRIMARY KEY,
+            started_at TEXT,
+            total_users INTEGER DEFAULT 0
+        )
     """)
 
     cur.execute("""
-    SELECT id
-    FROM sponsor_settings
-    WHERE id=1
+        CREATE TABLE IF NOT EXISTS sponsor_settings (
+            id INTEGER PRIMARY KEY,
+            active INTEGER DEFAULT 1,
+            disabled_at TEXT
+        )
     """)
 
-    sponsor_row = cur.fetchone()
-
-    if not sponsor_row:
-        cur.execute("""
-        INSERT INTO sponsor_settings
+    cur.execute("""
+        INSERT OR IGNORE INTO sponsor_settings
         (id, active, disabled_at)
         VALUES (1, 1, NULL)
-        """)
+    """)
 
-    cur.execute("SELECT COUNT(*) FROM users")
-    current_users = int(cur.fetchone()[0])
+    cur.execute("""
+        SELECT COUNT(*) FROM users
+    """)
 
-    cur.execute(
-        "SELECT id, total_users FROM bot_stats WHERE id=1"
-    )
+    total_users = cur.fetchone()[0]
 
-    stats = cur.fetchone()
-
-    if not stats:
-
-        cur.execute("""
-        INSERT INTO bot_stats
+    cur.execute("""
+        INSERT OR IGNORE INTO bot_stats
         (id, started_at, total_users)
         VALUES (1, ?, ?)
-        """, (
-            now(),
-            current_users
-        ))
+    """, (now(), total_users))
 
-    else:
-
-        old_total = int(stats[1] or 0)
-
-        if current_users > old_total:
-
-            cur.execute("""
-            UPDATE bot_stats
-            SET total_users=?
-            WHERE id=1
-            """, (
-                current_users,
-            ))
+    cur.execute("""
+        UPDATE bot_stats
+        SET total_users =
+            CASE
+                WHEN total_users < ? THEN ?
+                ELSE total_users
+            END
+        WHERE id = 1
+    """, (total_users, total_users))
 
     con.commit()
     con.close()
 
-    log.info(
-        "Database tayyor. Jami user: %s",
-        current_users
-    )
 
-
-# ==========================================================
-# HOMIY HOLATI
-# ==========================================================
+# =========================================================
+# SPONSOR
+# =========================================================
 
 def sponsor_is_active_sync():
-
     con = db()
     cur = con.cursor()
 
     cur.execute("""
-    SELECT active
-    FROM sponsor_settings
-    WHERE id=1
+        SELECT active
+        FROM sponsor_settings
+        WHERE id = 1
     """)
 
     row = cur.fetchone()
 
     con.close()
 
-    if not row:
+    if row is None:
         return True
 
     return bool(row[0])
 
 
 async def sponsor_is_active():
-
-    return await asyncio.to_thread(
-        sponsor_is_active_sync
-    )
+    return await asyncio.to_thread(sponsor_is_active_sync)
 
 
 def disable_sponsor_sync():
-
     con = db()
-    cur = con.cursor()
 
-    cur.execute("""
-    UPDATE sponsor_settings
-    SET active=0,
-        disabled_at=?
-    WHERE id=1
-    """, (
-        now(),
-    ))
+    con.execute("""
+        UPDATE sponsor_settings
+        SET active = 0,
+            disabled_at = ?
+        WHERE id = 1
+    """, (now(),))
 
     con.commit()
     con.close()
 
 
 async def disable_sponsor():
-
-    await asyncio.to_thread(
-        disable_sponsor_sync
-    )
-
-    log.info(
-        "✅ HOMIY OBUNASI AVTOMATIK O'CHIRILDI."
-    )
+    await asyncio.to_thread(disable_sponsor_sync)
 
 
 async def check_sponsor_limit(bot):
-
     try:
+        member_count = await bot.get_chat_member_count(SPONSOR_CHANNEL)
 
-        active = await sponsor_is_active()
-
-        if not active:
-            return
-
-        count = await bot.get_chat_member_count(
-            SPONSOR_CHANNEL
-        )
-
-        log.info(
-            "Homiya kanal a'zolari: %s / %s",
-            count,
-            SPONSOR_LIMIT
-        )
-
-        if count >= SPONSOR_LIMIT:
-
-            await disable_sponsor()
-
-            # Admin bo'lsa xabar beramiz
-            if ADMIN_ID:
+        if member_count >= SPONSOR_LIMIT:
+            if await sponsor_is_active():
+                await disable_sponsor()
 
                 try:
-
                     await bot.send_message(
                         ADMIN_ID,
-                        "🎉 <b>HOMIY KANAL LIMITIGA YETDI!</b>\n\n"
-                        f"📢 Kanal: {SPONSOR_CHANNEL}\n"
-                        f"👥 A'zolar: <b>{format_count(count)}</b>\n"
-                        f"🎯 Limit: <b>{SPONSOR_LIMIT}</b>\n\n"
-                        "✅ Majburiy obuna avtomatik o‘chirildi.",
-                        parse_mode="HTML"
+                        "⚠️ <b>Homiy kanal limiti to'ldi!</b>\n\n"
+                        f"👥 A'zolar: <b>{format_count(member_count)}</b>\n"
+                        f"🚫 Limit: <b>{format_count(SPONSOR_LIMIT)}</b>\n\n"
+                        "Majburiy obuna avtomatik o'chirildi.",
+                        parse_mode="HTML",
                     )
-
-                except TelegramError:
+                except Exception:
                     pass
 
-    except TelegramError as e:
-
-        log.error(
-            "Homiya kanal sonini tekshirish xatosi: %s",
-            e
-        )
+                logger.warning(
+                    "Sponsor limit reached: %s",
+                    member_count
+                )
 
     except Exception as e:
-
-        log.error(
-            "Sponsor limit error: %s",
-            e
-        )
+        logger.error("Sponsor limit error: %s", e)
 
 
 async def periodic_sponsor_check(bot):
-
-    await asyncio.sleep(10)
-
     while True:
-
         try:
-
             await check_sponsor_limit(bot)
-
-            # Har 60 sekundda tekshiradi
-            await asyncio.sleep(60)
-
-        except asyncio.CancelledError:
-
-            break
-
         except Exception as e:
+            logger.error("Periodic sponsor check: %s", e)
 
-            log.error(
-                "Periodic sponsor check error: %s",
-                e
-            )
-
-            await asyncio.sleep(60)
+        await asyncio.sleep(60)
 
 
-# ==========================================================
-# USER COUNT
-# ==========================================================
+# =========================================================
+# USERS
+# =========================================================
 
 def get_total_users_sync():
-
     con = db()
+
     cur = con.cursor()
 
-    cur.execute(
-        "SELECT total_users FROM bot_stats WHERE id=1"
-    )
+    cur.execute("""
+        SELECT COUNT(*)
+        FROM users
+    """)
 
-    row = cur.fetchone()
-
-    if row:
-
-        total = int(row[0] or 0)
-
-    else:
-
-        cur.execute(
-            "SELECT COUNT(*) FROM users"
-        )
-
-        total = int(
-            cur.fetchone()[0]
-        )
+    total = cur.fetchone()[0]
 
     con.close()
 
@@ -514,143 +354,104 @@ def get_total_users_sync():
 
 
 async def get_total_users():
+    return await asyncio.to_thread(get_total_users_sync)
 
-    return await asyncio.to_thread(
-        get_total_users_sync
-    )
-
-
-# ==========================================================
-# USER STATISTIKASI ENDI PUBLIC PROFILGA YOZILMAYDI
-# ==========================================================
 
 async def update_bot_user_count(bot):
-
     try:
-
-        # Statistikani bot profilida ko'rsatmaymiz.
-        # Public short description oddiy matn bo'lib qoladi.
         await bot.set_my_short_description(
-            short_description="⭐ Stars ishlang va o‘yinlarda qatnashing!"
+            "⭐ Stars ishlang va o'yinlarda qatnashing!"
         )
+    except Exception:
+        pass
 
-    except TelegramError as e:
-
-        log.error(
-            "Bot short description error: %s",
-            e
-        )
-
-    except Exception as e:
-
-        log.error(
-            "User count update error: %s",
-            e
-        )
-
-
-# ==========================================================
-# USER
-# ==========================================================
 
 def add_user_sync(
     user_id,
     username=None,
-    ref=None
+    referred_by=None,
 ):
-
     con = db()
     cur = con.cursor()
 
-    cur.execute(
-        "SELECT id FROM users WHERE id=?",
-        (user_id,)
-    )
+    cur.execute("""
+        SELECT id
+        FROM users
+        WHERE id = ?
+    """, (user_id,))
 
     exists = cur.fetchone()
 
-    created = False
-
     if not exists:
-
-        created = True
-
-        valid_ref = (
-            ref
-            if ref and ref != user_id
-            else None
-        )
-
         cur.execute("""
-        INSERT INTO users
-        (
-            id,
-            username,
-            points,
-            games,
-            wins,
-            referrals,
-            referred_by,
-            last_seen,
-            blocked,
-            referral_rewarded
-        )
-        VALUES (?, ?, 0, 0, 0, 0, ?, ?, 0, 0)
+            INSERT INTO users (
+                id,
+                username,
+                points,
+                games,
+                wins,
+                referrals,
+                referred_by,
+                last_seen,
+                blocked,
+                referral_rewarded
+            )
+            VALUES (?, ?, 0, 0, 0, 0, ?, ?, 0, 0)
         """, (
             user_id,
             username,
-            valid_ref,
-            now()
+            referred_by,
+            now(),
         ))
 
         cur.execute("""
-        UPDATE bot_stats
-        SET total_users=total_users+1
-        WHERE id=1
+            UPDATE bot_stats
+            SET total_users = total_users + 1
+            WHERE id = 1
         """)
 
-        if valid_ref:
+        if referred_by and referred_by != user_id:
+            cur.execute("""
+                SELECT id
+                FROM users
+                WHERE id = ?
+            """, (referred_by,))
 
-            cur.execute(
-                "SELECT id FROM users WHERE id=?",
-                (valid_ref,)
-            )
+            referrer_exists = cur.fetchone()
 
-            ref_exists = cur.fetchone()
-
-            if ref_exists:
-
+            if referrer_exists:
                 cur.execute("""
-                UPDATE users
-                SET points=points+?,
-                    referrals=referrals+1
-                WHERE id=?
+                    UPDATE users
+                    SET referrals = referrals + 1,
+                        points = points + ?
+                    WHERE id = ?
                 """, (
                     REFERRAL_REWARD,
-                    valid_ref
+                    referred_by,
                 ))
 
                 cur.execute("""
-                UPDATE users
-                SET referral_rewarded=1
-                WHERE id=?
-                """, (
-                    user_id,
-                ))
+                    UPDATE users
+                    SET referral_rewarded = 1
+                    WHERE id = ?
+                """, (user_id,))
+
+        created = True
 
     else:
-
         cur.execute("""
-        UPDATE users
-        SET username=?,
-            last_seen=?,
-            blocked=0
-        WHERE id=?
+            UPDATE users
+            SET username = ?,
+                last_seen = ?,
+                blocked = 0
+            WHERE id = ?
         """, (
             username,
             now(),
-            user_id
+            user_id,
         ))
+
+        created = False
 
     con.commit()
     con.close()
@@ -661,30 +462,42 @@ def add_user_sync(
 async def add_user(
     user_id,
     username=None,
-    ref=None,
-    bot=None
+    referred_by=None,
+    bot=None,
 ):
-
     created = await asyncio.to_thread(
         add_user_sync,
         user_id,
         username,
-        ref
+        referred_by,
     )
 
     if created and bot:
         await update_bot_user_count(bot)
 
+    return created
+
 
 def get_user(user_id):
-
     con = db()
+
     cur = con.cursor()
 
-    cur.execute(
-        "SELECT * FROM users WHERE id=?",
-        (user_id,)
-    )
+    cur.execute("""
+        SELECT
+            id,
+            username,
+            points,
+            games,
+            wins,
+            referrals,
+            referred_by,
+            last_seen,
+            blocked,
+            referral_rewarded
+        FROM users
+        WHERE id = ?
+    """, (user_id,))
 
     row = cur.fetchone()
 
@@ -693,319 +506,217 @@ def get_user(user_id):
     return row
 
 
-def change_points_sync(
-    user_id,
-    amount
-):
-
+def change_points_sync(user_id, amount):
     con = db()
+
     cur = con.cursor()
 
     cur.execute("""
-    UPDATE users
-    SET points=MAX(0, points+?)
-    WHERE id=?
+        UPDATE users
+        SET points = points + ?
+        WHERE id = ?
     """, (
         amount,
-        user_id
+        user_id,
     ))
 
     con.commit()
     con.close()
 
 
-async def change_points(
-    user_id,
-    amount
-):
-
+async def change_points(user_id, amount):
     await asyncio.to_thread(
         change_points_sync,
         user_id,
-        amount
+        amount,
     )
 
 
-def game_result_sync(
-    user_id,
-    won
-):
-
+def game_result_sync(user_id, win):
     con = db()
+
     cur = con.cursor()
 
-    cur.execute("""
-    UPDATE users
-    SET games=games+1,
-        wins=wins+?
-    WHERE id=?
-    """, (
-        1 if won else 0,
-        user_id
-    ))
+    if win:
+        cur.execute("""
+            UPDATE users
+            SET games = games + 1,
+                wins = wins + 1
+            WHERE id = ?
+        """, (user_id,))
+    else:
+        cur.execute("""
+            UPDATE users
+            SET games = games + 1
+            WHERE id = ?
+        """, (user_id,))
 
     con.commit()
     con.close()
 
 
-async def game_result(
-    user_id,
-    won
-):
-
+async def game_result(user_id, win):
     await asyncio.to_thread(
         game_result_sync,
         user_id,
-        won
+        win,
     )
 
 
-# ==========================================================
-# GITHUB BACKUP
-# ==========================================================
+# =========================================================
+# GITHUB DATABASE BACKUP
+# =========================================================
 
 save_lock = asyncio.Lock()
 
 
-def git_command(
-    command,
-    timeout=60
-):
-
+def git_command(command, timeout=60):
     return subprocess.run(
         command,
         capture_output=True,
         text=True,
-        timeout=timeout
+        timeout=timeout,
     )
 
 
 async def save_database():
-
     async with save_lock:
 
         def _save():
 
+            if not os.path.exists(DB_FILE):
+                return False
+
             try:
-
-                if not os.path.exists(DB_FILE):
-
-                    log.error(
-                        "DB fayl mavjud emas: %s",
-                        DB_FILE
-                    )
-
-                    return False
-
-                con = sqlite3.connect(
-                    DB_FILE,
-                    timeout=30
-                )
+                con = sqlite3.connect(DB_FILE)
 
                 try:
-
-                    con.execute(
-                        "PRAGMA wal_checkpoint(FULL)"
-                    )
-
+                    con.execute("PRAGMA wal_checkpoint(FULL)")
                 except Exception:
                     pass
 
                 con.close()
 
-                r = git_command([
+                git_command([
                     "git",
                     "config",
                     "user.name",
-                    "Zerikdim Bot"
+                    "Zerikdim Bot",
                 ])
 
-                if r.returncode != 0:
-
-                    log.error(
-                        "git config user.name: %s",
-                        r.stderr
-                    )
-
-                r = git_command([
+                git_command([
                     "git",
                     "config",
                     "user.email",
-                    "zerikdim-bot@users.noreply.github.com"
+                    "zerikdim-bot@users.noreply.github.com",
                 ])
 
-                if r.returncode != 0:
-
-                    log.error(
-                        "git config user.email: %s",
-                        r.stderr
-                    )
-
-                r = git_command([
+                git_command([
                     "git",
                     "add",
                     "-f",
-                    DB_FILE
+                    DB_FILE,
                 ])
 
-                if r.returncode != 0:
-
-                    log.error(
-                        "git add xatosi: %s",
-                        r.stderr
-                    )
-
-                    return False
-
-                r = git_command([
+                check = git_command([
                     "git",
                     "diff",
                     "--cached",
-                    "--quiet"
+                    "--quiet",
                 ])
 
-                if r.returncode == 0:
-
-                    log.info(
-                        "Database o‘zgarmagan."
-                    )
-
+                if check.returncode == 0:
                     return True
 
-                r = git_command([
+                commit = git_command([
                     "git",
                     "commit",
                     "-m",
-                    "Update Zerikdim database"
+                    "Update Zerikdim database",
                 ])
 
-                if r.returncode != 0:
-
-                    log.error(
-                        "git commit xatosi: %s",
-                        r.stderr
+                if commit.returncode != 0:
+                    logger.error(
+                        "Git commit error: %s",
+                        commit.stderr,
                     )
-
                     return False
 
-                r = git_command([
+                branch_result = git_command([
                     "git",
                     "branch",
-                    "--show-current"
+                    "--show-current",
                 ])
 
-                branch = r.stdout.strip()
+                branch = branch_result.stdout.strip() or "main"
 
-                if not branch:
-                    branch = "main"
-
-                r = git_command([
+                push = git_command([
                     "git",
                     "push",
                     "origin",
-                    branch
+                    branch,
                 ])
 
-                if r.returncode != 0:
-
-                    log.error(
-                        "❌ DATABASE GITHUBGA PUSH BO‘LMADI: %s",
-                        r.stderr
+                if push.returncode != 0:
+                    logger.error(
+                        "Git push error: %s",
+                        push.stderr,
                     )
-
                     return False
 
-                log.info(
-                    "✅ Database GitHubga muvaffaqiyatli saqlandi."
-                )
+                logger.info("Database successfully saved")
 
                 return True
 
-            except subprocess.TimeoutExpired:
-
-                log.error(
-                    "Git operatsiyasi timeout bo‘ldi."
-                )
-
-                return False
-
             except Exception as e:
-
-                log.error(
-                    "Database save error: %s",
+                logger.error(
+                    "Database backup error: %s",
                     e,
-                    exc_info=True
                 )
-
                 return False
 
-        return await asyncio.to_thread(
-            _save
-        )
+        return await asyncio.to_thread(_save)
 
 
 async def periodic_database_backup():
-
     await asyncio.sleep(30)
 
     while True:
-
         try:
-
             await save_database()
-
-            await asyncio.sleep(60)
-
-        except asyncio.CancelledError:
-
-            break
-
         except Exception as e:
-
-            log.error(
-                "Periodic backup error: %s",
-                e
+            logger.error(
+                "Periodic database backup error: %s",
+                e,
             )
 
-            await asyncio.sleep(60)
+        await asyncio.sleep(60)
 
 
-# ==========================================================
-# MAJBURIY OBUNA
-# ==========================================================
+# =========================================================
+# SUBSCRIPTION
+# =========================================================
 
-async def subscribed(
-    bot,
-    user_id
-):
-
-    # 150 ga yetgan bo'lsa homiy majburiy emas
+async def subscribed(bot, user_id):
     if not await sponsor_is_active():
         return True
 
     try:
-
         member = await bot.get_chat_member(
             SPONSOR_CHANNEL,
-            user_id
+            user_id,
         )
 
-        if member.status in (
+        return member.status in (
             ChatMemberStatus.MEMBER,
             ChatMemberStatus.ADMINISTRATOR,
-            ChatMemberStatus.OWNER
-        ):
+            ChatMemberStatus.OWNER,
+        )
 
-            return True
-
-        return False
-
-    except TelegramError as e:
-
-        log.error(
-            "Obuna tekshirish xatosi %s: %s",
-            SPONSOR_CHANNEL,
-            e
+    except Exception as e:
+        logger.error(
+            "Subscription check error: %s",
+            e,
         )
 
         return False
@@ -1013,256 +724,193 @@ async def subscribed(
 
 async def require_subscription(
     update,
-    context
+    context,
 ):
+    user = update.effective_user
 
-    user_id = update.effective_user.id
-
-    if user_id == ADMIN_ID:
+    if user.id == ADMIN_ID:
         return True
 
-    # Homiy o'chgan bo'lsa hech qanday kanal so'ramaydi
     if not await sponsor_is_active():
         return True
 
     if await subscribed(
         context.bot,
-        user_id
+        user.id,
     ):
-
         return True
 
-    keyboard = [
+    keyboard = InlineKeyboardMarkup([
         [
             InlineKeyboardButton(
-                "📢 HOMIY KANAL",
-                url=SPONSOR_URL
+                "📢 Homiy kanalga obuna bo'lish",
+                url=SPONSOR_URL,
             )
         ],
         [
             InlineKeyboardButton(
                 "✅ Tekshirish",
-                callback_data="check_sub"
+                callback_data="check_sub",
             )
-        ]
-    ]
-
-    text = (
-        "🔒 <b>Botdan foydalanish uchun homiy kanalga "
-        "obuna bo‘ling.</b>\n\n"
-        "📢 Kanal: <b>@SALIKH_PUBG</b>\n\n"
-        "Obuna bo‘lgach, «Tekshirish» tugmasini bosing."
-    )
+        ],
+    ])
 
     if update.callback_query:
-
-        await update.callback_query.message.reply_text(
-            text,
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(
-                keyboard
+        try:
+            await update.callback_query.message.reply_text(
+                "🔒 <b>Botdan foydalanish uchun kanalga obuna bo'ling.</b>\n\n"
+                f"📢 Kanal: {SPONSOR_CHANNEL}\n\n"
+                "Obuna bo'lgach, «Tekshirish» tugmasini bosing.",
+                reply_markup=keyboard,
+                parse_mode="HTML",
             )
-        )
-
+        except Exception:
+            pass
     else:
-
         await update.message.reply_text(
-            text,
+            "🔒 <b>Botdan foydalanish uchun kanalga obuna bo'ling.</b>\n\n"
+            f"📢 Kanal: {SPONSOR_CHANNEL}\n\n"
+            "Obuna bo'lgach, «Tekshirish» tugmasini bosing.",
+            reply_markup=keyboard,
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(
-                keyboard
-            )
         )
 
     return False
 
 
-# ==========================================================
-# ASOSIY MENYU
-# ==========================================================
+# =========================================================
+# MAIN MENU
+# =========================================================
 
-def main_menu(
-    is_admin=False
-):
-
+def main_menu(is_admin=False):
     keyboard = [
-
         [
             InlineKeyboardButton(
                 "⭐ STARS OLISH",
-                callback_data="buy"
+                callback_data="buy",
             )
         ],
-
         [
             InlineKeyboardButton(
                 "🎯 STARS ISHLASH",
-                callback_data="games"
+                callback_data="games",
             )
         ],
-
         [
             InlineKeyboardButton(
-                "🎮 O‘YINLAR",
-                callback_data="other_games"
+                "🎮 O'YINLAR",
+                callback_data="games",
             )
         ],
-
         [
             InlineKeyboardButton(
                 "💰 BALANS",
-                callback_data="balance"
+                callback_data="balance",
             ),
             InlineKeyboardButton(
                 "🎁 TOPSHIRIQLAR",
-                callback_data="tasks"
-            )
+                callback_data="tasks",
+            ),
         ],
-
         [
             InlineKeyboardButton(
                 "👥 REFERAL",
-                callback_data="ref"
+                callback_data="ref",
             ),
             InlineKeyboardButton(
                 "💸 YECHIB OLISH",
-                callback_data="withdraw"
-            )
+                callback_data="withdraw",
+            ),
         ],
-
         [
             InlineKeyboardButton(
                 "🏆 REYTING",
-                callback_data="rating"
+                callback_data="rating",
             ),
             InlineKeyboardButton(
                 "👤 PROFIL",
-                callback_data="profile"
-            )
-        ]
+                callback_data="profile",
+            ),
+        ],
     ]
 
     if is_admin:
-
         keyboard.append([
             InlineKeyboardButton(
                 "⚙️ ADMIN PANEL",
-                callback_data="admin"
+                callback_data="admin",
             )
         ])
 
-    return InlineKeyboardMarkup(
-        keyboard
-    )
+    return InlineKeyboardMarkup(keyboard)
 
 
-# ==========================================================
+# =========================================================
 # START
-# ==========================================================
+# =========================================================
 
 async def start(
     update: Update,
-    context: ContextTypes.DEFAULT_TYPE
+    context: ContextTypes.DEFAULT_TYPE,
 ):
-
     user = update.effective_user
 
     ref = None
 
     if context.args:
-
         try:
             ref = int(context.args[0])
-
-        except ValueError:
+        except Exception:
             ref = None
 
     await add_user(
         user.id,
         user.username,
         ref,
-        context.bot
+        context.bot,
     )
 
-    # Limitga yetgan-yetmaganini tekshiramiz
-    await check_sponsor_limit(
-        context.bot
-    )
+    await check_sponsor_limit(context.bot)
 
     if not await require_subscription(
         update,
-        context
+        context,
     ):
-
         return
 
-    admin = (
-        user.id == ADMIN_ID
+    admin = user.id == ADMIN_ID
+
+    text = (
+        "👋 <b>Zerikdim Botga xush kelibsiz!</b>\n\n"
+        "⭐ Stars ishlang, topshiriqlar bajaring va "
+        "do'stlaringizni taklif qiling.\n\n"
+        "👇 Kerakli bo'limni tanlang:"
     )
-
-    # Oddiy foydalanuvchiga statistika ko'rsatilmaydi
-    if admin:
-
-        total_users = await get_total_users()
-
-        text = (
-            "👋 <b>Zerikdim Botga xush kelibsiz!</b>\n\n"
-            "⭐ Stars ishlang, topshiriqlar bajaring va "
-            "do‘stlaringizni taklif qiling.\n\n"
-            f"👥 <b>Botdagi jami foydalanuvchilar: "
-            f"{format_count(total_users)} ta</b>\n\n"
-            "👇 Kerakli bo‘limni tanlang:"
-        )
-
-    else:
-
-        text = (
-            "👋 <b>Zerikdim Botga xush kelibsiz!</b>\n\n"
-            "⭐ Stars ishlang, topshiriqlar bajaring va "
-            "do‘stlaringizni taklif qiling.\n\n"
-            "👇 Kerakli bo‘limni tanlang:"
-        )
 
     await update.message.reply_text(
         text,
+        reply_markup=main_menu(admin),
         parse_mode="HTML",
-        reply_markup=main_menu(admin)
     )
 
 
-# ==========================================================
-# O'YIN MENYUSI
-# ==========================================================
+# =========================================================
+# GAMES MENU
+# =========================================================
 
 def games_menu():
-
     keyboard = []
 
-    for i in range(
-        0,
-        len(GAMES),
-        2
-    ):
+    items = list(GAMES.items())
 
+    for i in range(0, len(items), 2):
         row = []
 
-        name1, code1 = GAMES[i]
-
-        row.append(
-            InlineKeyboardButton(
-                name1,
-                callback_data=f"game_{code1}"
-            )
-        )
-
-        if i + 1 < len(GAMES):
-
-            name2, code2 = GAMES[i + 1]
-
+        for game_id, name in items[i:i + 2]:
             row.append(
                 InlineKeyboardButton(
-                    name2,
-                    callback_data=f"game_{code2}"
+                    name,
+                    callback_data=f"game_{game_id}",
                 )
             )
 
@@ -1270,1004 +918,799 @@ def games_menu():
 
     keyboard.append([
         InlineKeyboardButton(
-            "⬅️ Bosh menyu",
-            callback_data="home"
+            "🏠 Bosh menyu",
+            callback_data="home",
         )
     ])
 
-    return InlineKeyboardMarkup(
-        keyboard
-    )
+    return InlineKeyboardMarkup(keyboard)
 
 
-# ==========================================================
+# =========================================================
 # GAME COOLDOWN
-# ==========================================================
+# =========================================================
 
-def can_play(
-    context,
-    user_id
-):
-
+def can_play(context, user_id):
     key = f"game_last_{user_id}"
 
-    last = context.user_data.get(
-        key
-    )
+    last = context.user_data.get(key)
 
     if last is None:
-        return True, 0
+        return True
 
-    elapsed = (
-        asyncio.get_event_loop().time()
-        - last
+    return (
+        asyncio.get_event_loop().time() - last
+        >= GAME_COOLDOWN
     )
 
-    if elapsed < GAME_COOLDOWN:
 
-        return (
-            False,
-            int(
-                GAME_COOLDOWN - elapsed
-            )
-        )
-
-    return True, 0
-
-
-def mark_game(
-    context,
-    user_id
-):
-
+def mark_game(context, user_id):
     context.user_data[
         f"game_last_{user_id}"
     ] = asyncio.get_event_loop().time()
 
 
-# ==========================================================
-# GAME START
-# ==========================================================
+# =========================================================
+# START GAME
+# =========================================================
 
 async def start_game(
-    update,
+    query,
     context,
-    game
+    game_id,
 ):
+    user = query.from_user
 
-    user_id = update.effective_user.id
-
-    allowed, wait = can_play(
+    if not can_play(
         context,
-        user_id
-    )
-
-    if not allowed:
-
-        await update.callback_query.message.reply_text(
-            f"⏳ Keyingi o‘yinni boshlash uchun "
-            f"<b>{wait} soniya</b> kuting.",
-            parse_mode="HTML"
+        user.id,
+    ):
+        await query.message.reply_text(
+            f"⏳ Keyingi o'yinni boshlash uchun "
+            f"<b>{GAME_COOLDOWN} soniya</b> kuting.",
+            parse_mode="HTML",
         )
-
         return
 
     mark_game(
         context,
-        user_id
+        user.id,
     )
 
-    q = update.callback_query
+    context.user_data.pop(
+        "game",
+        None,
+    )
 
-    if game == "quiz":
+    context.user_data.pop(
+        "game_data",
+        None,
+    )
 
-        question, answers, correct = random.choice(
-            QUIZ
-        )
+    context.user_data["game"] = game_id
 
-        context.user_data["game"] = {
-            "type": "quiz",
-            "correct": correct,
-            "reward": 1.0
+    # -----------------------------------------------------
+    # QUIZ
+    # -----------------------------------------------------
+
+    if game_id == "quiz":
+        question, options, answer = random.choice(QUIZ)
+
+        context.user_data["game_data"] = {
+            "answer": answer,
         }
 
         keyboard = [
             [
                 InlineKeyboardButton(
-                    answer,
-                    callback_data=f"answer_{i}"
+                    option,
+                    callback_data=f"choice_{i}",
                 )
             ]
-            for i, answer in enumerate(answers)
+            for i, option in enumerate(options)
         ]
 
-        await q.message.reply_text(
-            "🧠 <b>Qiyin savol</b>\n\n"
-            f"{question}\n\n"
-            "To‘g‘ri javobni tanlang:",
+        context.user_data["choice_options"] = options
+
+        await query.message.reply_text(
+            "🧠 <b>Viktorina</b>\n\n"
+            f"{question}",
+            reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(
-                keyboard
-            )
         )
 
-        return
+    # -----------------------------------------------------
+    # NUMBER
+    # -----------------------------------------------------
 
-    if game == "number":
-
+    elif game_id == "number":
         number = random.randint(
             1,
-            100
+            30,
         )
 
-        context.user_data["game"] = {
-            "type": "number",
-            "number": number,
+        context.user_data["game_data"] = {
+            "answer": number,
             "tries": 0,
-            "reward": 1.5
         }
 
-        await q.message.reply_text(
-            "🔢 <b>Sonni toping</b>\n\n"
-            "Men 1 dan 100 gacha bitta son o‘yladim.\n"
-            "Uni topish uchun son yuboring.\n\n"
-            "⚠️ 7 ta urinish bor.",
-            parse_mode="HTML"
+        await query.message.reply_text(
+            "🔢 <b>Son topish</b>\n\n"
+            "1 dan 30 gacha son o'yladim.\n"
+            "Sonni yozing.",
+            parse_mode="HTML",
         )
 
-        return
+    # -----------------------------------------------------
+    # CHOICE
+    # -----------------------------------------------------
 
-    if game == "choice":
-
+    elif game_id == "choice":
         options = [
-            "A",
-            "B",
-            "C",
-            "D",
-            "E"
+            "1️⃣",
+            "2️⃣",
+            "3️⃣",
+            "4️⃣",
         ]
 
-        correct = random.choice(
-            options
-        )
+        answer = random.choice(options)
 
-        context.user_data["game"] = {
-            "type": "choice",
-            "correct": correct,
-            "reward": 1.0
-        }
-
-        random.shuffle(
-            options
-        )
-
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    x,
-                    callback_data=f"choice_{x}"
-                )
-                for x in options[:3]
-            ],
-            [
-                InlineKeyboardButton(
-                    x,
-                    callback_data=f"choice_{x}"
-                )
-                for x in options[3:]
-            ]
-        ]
-
-        await q.message.reply_text(
-            "⚡ <b>Tez tanla</b>\n\n"
-            "5 ta variantdan to‘g‘ri javobni tanlang:",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(
-                keyboard
-            )
-        )
-
-        return
-
-    if game == "logic":
-
-        question, answers, correct = random.choice(
-            LOGIC_QUESTIONS
-        )
-
-        context.user_data["game"] = {
-            "type": "logic",
-            "correct": correct,
-            "reward": 1.5
+        context.user_data["game_data"] = {
+            "answer": answer,
         }
 
         keyboard = [
             [
                 InlineKeyboardButton(
                     x,
-                    callback_data=f"logic_{i}"
-                )
-            ]
-            for i, x in enumerate(answers)
-        ]
-
-        await q.message.reply_text(
-            "🧩 <b>Mantiqiy masala</b>\n\n"
-            f"{question}",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(
-                keyboard
-            )
-        )
-
-        return
-
-    if game == "target":
-
-        target = random.randint(
-            1,
-            9
-        )
-
-        context.user_data["game"] = {
-            "type": "target",
-            "correct": target,
-            "reward": 1.0
-        }
-
-        keyboard = []
-
-        nums = list(
-            range(1, 10)
-        )
-
-        for i in range(
-            0,
-            9,
-            3
-        ):
-
-            keyboard.append([
-                InlineKeyboardButton(
-                    str(x),
-                    callback_data=f"target_{x}"
-                )
-                for x in nums[i:i + 3]
-            ])
-
-        await q.message.reply_text(
-            "🎯 <b>Nishon</b>\n\n"
-            "Quyidagi raqamlar ichidan yashirin "
-            "nishonni toping.\n\n"
-            "💡 Ishora: nishon juft yoki toq bo‘lishi mumkin.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(
-                keyboard
-            )
-        )
-
-        return
-
-    if game == "word":
-
-        scrambled, correct_word = random.choice(
-            WORDS
-        )
-
-        letters = list(
-            correct_word
-        )
-
-        random.shuffle(
-            letters
-        )
-
-        scrambled = "".join(
-            letters
-        )
-
-        context.user_data["game"] = {
-            "type": "word",
-            "correct_word": correct_word.lower(),
-            "reward": 1.3
-        }
-
-        await q.message.reply_text(
-            "🔤 <b>So‘zni toping</b>\n\n"
-            f"Aralashtirilgan harflar:\n"
-            f"🔀 <code>{scrambled}</code>\n\n"
-            "So‘zni yozib yuboring.",
-            parse_mode="HTML"
-        )
-
-        return
-
-    if game == "math":
-
-        a = random.randint(
-            15,
-            80
-        )
-
-        b = random.randint(
-            5,
-            40
-        )
-
-        c = random.randint(
-            2,
-            9
-        )
-
-        operations = [
-            ("+", a + b * c),
-            ("-", a * c - b),
-            ("×", a * b + c),
-        ]
-
-        operation, answer = random.choice(
-            operations
-        )
-
-        if operation == "+":
-
-            text = f"{a} + {b} × {c}"
-
-        elif operation == "-":
-
-            text = f"{a} × {c} − {b}"
-
-        else:
-
-            text = f"{a} × {b} + {c}"
-
-        context.user_data["game"] = {
-            "type": "math",
-            "correct": answer,
-            "reward": 1.7
-        }
-
-        await q.message.reply_text(
-            "🧮 <b>Hisoblang</b>\n\n"
-            f"❓ {text} = ?\n\n"
-            "⚠️ Amallar tartibiga e’tibor bering.",
-            parse_mode="HTML"
-        )
-
-        return
-
-    if game == "attention":
-
-        nums = list(
-            range(1, 10)
-        )
-
-        random.shuffle(
-            nums
-        )
-
-        special = random.choice(
-            nums
-        )
-
-        context.user_data["game"] = {
-            "type": "attention",
-            "correct": special,
-            "reward": 1.2
-        }
-
-        keyboard = []
-
-        for i in range(
-            0,
-            9,
-            3
-        ):
-
-            keyboard.append([
-                InlineKeyboardButton(
-                    str(x),
-                    callback_data=f"attention_{x}"
-                )
-                for x in nums[i:i + 3]
-            ])
-
-        await q.message.reply_text(
-            "👀 <b>Diqqat!</b>\n\n"
-            "Quyidagi raqamlardan tasodifiy "
-            "bittasi yashirin nishon.\n"
-            "Uni toping.",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(
-                keyboard
-            )
-        )
-
-        return
-
-    if game == "color":
-
-        correct_text, correct_value = random.choice(
-            COLORS
-        )
-
-        options = [
-            x[1]
-            for x in COLORS
-        ]
-
-        random.shuffle(
-            options
-        )
-
-        context.user_data["game"] = {
-            "type": "color",
-            "correct": correct_value,
-            "reward": 1.2
-        }
-
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    x,
-                    callback_data=f"color_{x}"
+                    callback_data=f"choiceanswer_{x}",
                 )
                 for x in options[:2]
             ],
             [
                 InlineKeyboardButton(
                     x,
-                    callback_data=f"color_{x}"
+                    callback_data=f"choiceanswer_{x}",
                 )
                 for x in options[2:]
-            ]
+            ],
         ]
 
-        await q.message.reply_text(
-            "🎨 <b>Rangni toping</b>\n\n"
-            f"Rang belgisi: {correct_text}\n\n"
-            "Mos nomni tanlang:",
+        await query.message.reply_text(
+            "🎯 <b>Tanlov</b>\n\n"
+            "To'g'ri variantni toping.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(
-                keyboard
-            )
         )
 
-        return
+        context.user_data["choice_answer"] = answer
 
-    if game == "code":
+    # -----------------------------------------------------
+    # LOGIC
+    # -----------------------------------------------------
 
-        digits = random.sample(
-            range(0, 10),
-            4
+    elif game_id == "logic":
+        question, options, answer = random.choice(
+            LOGIC_QUESTIONS
         )
 
-        code = "".join(
-            str(x)
-            for x in digits
-        )
-
-        context.user_data["game"] = {
-            "type": "code",
-            "correct": code,
-            "reward": 2.0
-        }
-
-        await q.message.reply_text(
-            "🔐 <b>Kodni toping</b>\n\n"
-            "4 xonali kod yashirildi.\n"
-            "Koddagi raqamlarning yig‘indisi "
-            f"<b>{sum(digits)}</b> ga teng.\n\n"
-            "Kodda raqamlar takrorlanmaydi.\n"
-            "Kodni yozib yuboring.",
-            parse_mode="HTML"
-        )
-
-        return
-
-    if game == "knowledge":
-
-        question, answers, correct = random.choice(
-            KNOWLEDGE
-        )
-
-        context.user_data["game"] = {
-            "type": "knowledge",
-            "correct": correct,
-            "reward": 1.3
+        context.user_data["game_data"] = {
+            "answer": answer,
         }
 
         keyboard = [
             [
                 InlineKeyboardButton(
-                    x,
-                    callback_data=f"knowledge_{i}"
+                    option,
+                    callback_data=f"logic_{i}",
                 )
             ]
-            for i, x in enumerate(answers)
+            for i, option in enumerate(options)
         ]
 
-        await q.message.reply_text(
-            "📚 <b>Bilim savoli</b>\n\n"
+        context.user_data["logic_options"] = options
+
+        await query.message.reply_text(
+            "🧩 <b>Mantiqiy savol</b>\n\n"
             f"{question}",
+            reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(
-                keyboard
-            )
         )
 
-        return
+    # -----------------------------------------------------
+    # TARGET
+    # -----------------------------------------------------
 
-    if game == "speed":
+    elif game_id == "target":
+        target = random.randint(
+            1,
+            10,
+        )
 
+        context.user_data["game_data"] = {
+            "answer": target,
+        }
+
+        keyboard = []
+
+        for i in range(1, 11, 2):
+            keyboard.append([
+                InlineKeyboardButton(
+                    str(i),
+                    callback_data=f"target_{i}",
+                ),
+                InlineKeyboardButton(
+                    str(i + 1),
+                    callback_data=f"target_{i + 1}",
+                ),
+            ])
+
+        await query.message.reply_text(
+            "🎯 <b>Nishon</b>\n\n"
+            "1 dan 10 gacha yashirin raqam bor.\n"
+            "To'g'ri raqamni toping.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML",
+        )
+
+    # -----------------------------------------------------
+    # WORD
+    # -----------------------------------------------------
+
+    elif game_id == "word":
+        scrambled, correct = random.choice(
+            WORDS
+        )
+
+        context.user_data["game_data"] = {
+            "answer": correct.lower(),
+        }
+
+        await query.message.reply_text(
+            "🔤 <b>So'z topish</b>\n\n"
+            f"Aralashtirilgan so'z: <b>{scrambled}</b>\n\n"
+            "To'g'ri so'zni yozing.",
+            parse_mode="HTML",
+        )
+
+    # -----------------------------------------------------
+    # MATH
+    # -----------------------------------------------------
+
+    elif game_id == "math":
+        a = random.randint(2, 20)
+        b = random.randint(2, 20)
+
+        operators = ["+", "-", "*"]
+        operator = random.choice(operators)
+
+        if operator == "+":
+            answer = a + b
+        elif operator == "-":
+            answer = a - b
+        else:
+            answer = a * b
+
+        context.user_data["game_data"] = {
+            "answer": answer,
+        }
+
+        await query.message.reply_text(
+            "➗ <b>Matematika</b>\n\n"
+            f"<b>{a} {operator} {b} = ?</b>\n\n"
+            "Javobni yozing.",
+            parse_mode="HTML",
+        )
+
+    # -----------------------------------------------------
+    # ATTENTION
+    # -----------------------------------------------------
+
+    elif game_id == "attention":
+        values = [
+            "🔴",
+            "🔵",
+            "🟢",
+            "🟡",
+            "🟣",
+        ]
+
+        sequence = [
+            random.choice(values)
+            for _ in range(5)
+        ]
+
+        answer = sequence[2]
+
+        context.user_data["game_data"] = {
+            "answer": answer,
+        }
+
+        await query.message.reply_text(
+            "👀 <b>Diqqat</b>\n\n"
+            + " ".join(sequence)
+            + "\n\n"
+            "O'rtadagi belgini yozing.",
+            parse_mode="HTML",
+        )
+
+    # -----------------------------------------------------
+    # COLOR
+    # -----------------------------------------------------
+
+    elif game_id == "color":
+        emoji, answer = random.choice(
+            COLORS
+        )
+
+        context.user_data["game_data"] = {
+            "answer": answer.lower(),
+        }
+
+        options = [
+            "Qizil",
+            "Yashil",
+            "Ko'k",
+            "Sariq",
+        ]
+
+        random.shuffle(options)
+
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    option,
+                    callback_data=f"color_{i}",
+                )
+            ]
+            for i, option in enumerate(options)
+        ]
+
+        context.user_data["color_options"] = options
+
+        await query.message.reply_text(
+            "🎨 <b>Rang</b>\n\n"
+            f"{emoji}\n\n"
+            "Bu qaysi rang?",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML",
+        )
+
+    # -----------------------------------------------------
+    # CODE
+    # -----------------------------------------------------
+
+    elif game_id == "code":
+        numbers = [
+            random.randint(1, 9)
+            for _ in range(4)
+        ]
+
+        answer = sum(numbers)
+
+        context.user_data["game_data"] = {
+            "answer": answer,
+        }
+
+        await query.message.reply_text(
+            "🔐 <b>Kod</b>\n\n"
+            f"Sonlar: <b>{' + '.join(map(str, numbers))}</b>\n\n"
+            "Ularning yig'indisini yozing.",
+            parse_mode="HTML",
+        )
+
+    # -----------------------------------------------------
+    # KNOWLEDGE
+    # -----------------------------------------------------
+
+    elif game_id == "knowledge":
+        question, options, answer = random.choice(
+            KNOWLEDGE
+        )
+
+        context.user_data["game_data"] = {
+            "answer": answer,
+        }
+
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    option,
+                    callback_data=f"knowledge_{i}",
+                )
+            ]
+            for i, option in enumerate(options)
+        ]
+
+        context.user_data["knowledge_options"] = options
+
+        await query.message.reply_text(
+            "📚 <b>Bilim</b>\n\n"
+            f"{question}",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML",
+        )
+
+    # -----------------------------------------------------
+    # SPEED
+    # -----------------------------------------------------
+
+    elif game_id == "speed":
         a = random.randint(
             10,
-            30
+            50,
         )
 
         b = random.randint(
-            5,
-            20
+            2,
+            20,
         )
 
         answer = a + b
 
-        context.user_data["game"] = {
-            "type": "speed",
-            "correct": answer,
-            "reward": 2.0
+        context.user_data["game_data"] = {
+            "answer": answer,
         }
 
-        await q.message.reply_text(
-            "⏱ <b>TEZLIK TESTI</b>\n\n"
-            f"⚡ {a} + {b} = ?\n\n"
-            "Javobni imkon qadar tez yuboring!",
-            parse_mode="HTML"
+        await query.message.reply_text(
+            "⚡ <b>Tezlik</b>\n\n"
+            f"<b>{a} + {b} = ?</b>\n\n"
+            "Javobni tez yozing!",
+            parse_mode="HTML",
         )
 
-        return
 
-
-# ==========================================================
-# GAME ANSWERS
-# ==========================================================
+# =========================================================
+# GAME ANSWER
+# =========================================================
 
 async def process_game_answer(
     update,
-    context
+    context,
+    text,
 ):
-
-    user_id = update.effective_user.id
+    user = update.effective_user
 
     game = context.user_data.get(
         "game"
     )
 
-    if not game:
-        return
-
-    if not update.message or not update.message.text:
-        return
-
-    answer_text = update.message.text.strip()
-
-    game_type = game.get(
-        "type"
+    data = context.user_data.get(
+        "game_data"
     )
+
+    if not game or not data:
+        return False
+
+    answer = data.get(
+        "answer"
+    )
+
+    normalized = text.strip().lower()
 
     correct = False
 
-    if game_type == "number":
-
-        try:
-
-            value = int(
-                answer_text
-            )
-
-        except ValueError:
-
-            await update.message.reply_text(
-                "❌ Faqat raqam yuboring."
-            )
-
-            return
-
-        game["tries"] += 1
-
-        if value == game["number"]:
-
-            correct = True
-
-        elif game["tries"] >= 7:
-
-            await game_result(
-                user_id,
-                False
-            )
-
-            context.user_data.pop(
-                "game",
-                None
-            )
-
-            await update.message.reply_text(
-                f"❌ Yutqazdingiz.\n\n"
-                f"🔐 To‘g‘ri son: {game['number']}"
-            )
-
-            await save_database()
-
-            return
-
-        else:
-
-            if value < game["number"]:
-                hint = "⬆️ Kattaroq son."
-            else:
-                hint = "⬇️ Kichikroq son."
-
-            await update.message.reply_text(
-                f"{hint}\n"
-                f"🎯 Qolgan urinish: "
-                f"{7 - game['tries']}"
-            )
-
-            return
-
-    elif game_type == "word":
-
-        if answer_text.lower() == game["correct_word"]:
-
-            correct = True
-
-    elif game_type in (
+    if game in (
+        "number",
         "math",
         "code",
-        "speed"
+        "speed",
     ):
-
-        if answer_text == str(
-            game["correct"]
-        ):
-
-            correct = True
-
-    if correct:
-
-        reward = float(
-            game.get(
-                "reward",
-                GAME_REWARD
+        try:
+            user_answer = int(
+                normalized
             )
+        except Exception:
+            await update.message.reply_text(
+                "❌ Iltimos, raqam kiriting."
+            )
+            return True
+
+        if game == "number":
+            if user_answer == answer:
+                correct = True
+
+            else:
+                data["tries"] = data.get(
+                    "tries",
+                    0,
+                ) + 1
+
+                tries = data["tries"]
+
+                if tries >= 7:
+                    await game_result(
+                        user.id,
+                        False,
+                    )
+
+                    context.user_data.pop(
+                        "game",
+                        None,
+                    )
+
+                    context.user_data.pop(
+                        "game_data",
+                        None,
+                    )
+
+                    await update.message.reply_text(
+                        f"❌ Yutqazdingiz.\n\n"
+                        f"To'g'ri javob: <b>{answer}</b>",
+                        parse_mode="HTML",
+                    )
+
+                    await save_database()
+
+                    return True
+
+                if user_answer < answer:
+                    hint = "⬆️ Kattaroq son."
+                else:
+                    hint = "⬇️ Kichikroq son."
+
+                await update.message.reply_text(
+                    f"❌ Noto'g'ri.\n"
+                    f"{hint}\n\n"
+                    f"Urinish: {tries}/7"
+                )
+
+                return True
+
+        else:
+            correct = (
+                user_answer == answer
+            )
+
+    elif game in (
+        "word",
+        "attention",
+    ):
+        correct = (
+            normalized
+            == str(answer).lower()
         )
 
+    if correct:
+        reward = random.choice([
+            1.0,
+            1.2,
+            1.5,
+            2.0,
+        ])
+
         await change_points(
-            user_id,
-            reward
+            user.id,
+            reward,
         )
 
         await game_result(
-            user_id,
-            True
-        )
-
-        context.user_data.pop(
-            "game",
-            None
+            user.id,
+            True,
         )
 
         await update.message.reply_text(
-            "🎉 <b>TO‘G‘RI!</b>\n\n"
-            f"⭐ +{reward:g} Stars\n\n"
-            "🔥 Juda yaxshi!",
-            parse_mode="HTML"
+            "🎉 <b>To'g'ri!</b>\n\n"
+            f"⭐ Siz <b>{reward}</b> Stars yutdingiz!",
+            parse_mode="HTML",
         )
 
     else:
-
         await game_result(
-            user_id,
-            False
-        )
-
-        context.user_data.pop(
-            "game",
-            None
+            user.id,
+            False,
         )
 
         await update.message.reply_text(
-            "❌ <b>Noto‘g‘ri javob.</b>\n\n"
-            "Keyingi o‘yinda yana urinib ko‘ring.",
-            parse_mode="HTML"
+            "❌ Noto'g'ri javob."
         )
+
+    context.user_data.pop(
+        "game",
+        None,
+    )
+
+    context.user_data.pop(
+        "game_data",
+        None,
+    )
 
     await save_database()
 
+    return True
 
-# ==========================================================
-# CALLBACK
-# ==========================================================
+
+# =========================================================
+# MENU CALLBACK
+# =========================================================
 
 async def menu(
     update: Update,
-    context: ContextTypes.DEFAULT_TYPE
+    context: ContextTypes.DEFAULT_TYPE,
 ):
+    query = update.callback_query
 
-    q = update.callback_query
+    await query.answer()
 
-    await q.answer()
+    user = query.from_user
 
-    user = q.from_user
-    data = q.data
+    data = query.data
 
     await add_user(
         user.id,
         user.username,
         None,
-        context.bot
+        context.bot,
     )
 
-    # Limitni har callbackda ham tekshiramiz
     await check_sponsor_limit(
         context.bot
     )
 
-    # ======================================================
+    # -----------------------------------------------------
     # CHECK SUB
-    # ======================================================
+    # -----------------------------------------------------
 
     if data == "check_sub":
-
-        if not await sponsor_is_active():
-
-            await q.message.reply_text(
-                "✅ <b>Homiy kanal talabi o‘chirildi!</b>\n\n"
-                "Endi botdan foydalanishingiz mumkin.",
-                parse_mode="HTML",
-                reply_markup=main_menu(
-                    user.id == ADMIN_ID
-                )
-            )
-
-            return
-
         if await subscribed(
             context.bot,
-            user.id
+            user.id,
         ):
-
-            await q.message.reply_text(
-                "✅ <b>Obuna tasdiqlandi!</b>\n\n"
+            await query.message.reply_text(
+                "✅ Obuna tasdiqlandi!\n\n"
                 "Endi botdan foydalanishingiz mumkin.",
-                parse_mode="HTML",
                 reply_markup=main_menu(
                     user.id == ADMIN_ID
-                )
+                ),
             )
-
         else:
-
-            await q.message.reply_text(
-                "❌ Hali homiy kanalga obuna bo‘lmagansiz.\n\n"
-                "Obuna bo‘lib, yana tekshiring."
+            await query.message.reply_text(
+                "❌ Siz hali kanalga obuna bo'lmagansiz.",
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton(
+                            "📢 Kanalga kirish",
+                            url=SPONSOR_URL,
+                        )
+                    ],
+                    [
+                        InlineKeyboardButton(
+                            "✅ Tekshirish",
+                            callback_data="check_sub",
+                        )
+                    ],
+                ]),
             )
 
         return
 
-    # ======================================================
+    # -----------------------------------------------------
     # SUBSCRIPTION
-    # ======================================================
+    # -----------------------------------------------------
 
     if user.id != ADMIN_ID:
-
-        if not await subscribed(
-            context.bot,
-            user.id
+        if not await require_subscription(
+            update,
+            context,
         ):
-
-            await require_subscription(
-                update,
-                context
-            )
-
             return
 
-    # ======================================================
+    # -----------------------------------------------------
     # HOME
-    # ======================================================
+    # -----------------------------------------------------
 
     if data == "home":
+        text = (
+            "🏠 <b>Asosiy menyu</b>\n\n"
+            "👇 Kerakli bo'limni tanlang:"
+        )
 
-        # Statistikani faqat admin ko'radi
-        if user.id == ADMIN_ID:
-
-            total_users = await get_total_users()
-
-            text = (
-                "🏠 <b>Asosiy menyu</b>\n\n"
-                f"👥 Jami foydalanuvchilar: "
-                f"<b>{format_count(total_users)}</b>"
-            )
-
-        else:
-
-            text = (
-                "🏠 <b>Asosiy menyu</b>\n\n"
-                "👇 Kerakli bo‘limni tanlang:"
-            )
-
-        await q.message.reply_text(
+        await query.message.reply_text(
             text,
-            parse_mode="HTML",
             reply_markup=main_menu(
                 user.id == ADMIN_ID
-            )
+            ),
+            parse_mode="HTML",
         )
 
         return
 
-    # ======================================================
+    # -----------------------------------------------------
     # BUY
-    # ======================================================
+    # -----------------------------------------------------
 
     if data == "buy":
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(
+                    "⭐ Stars sotib olish",
+                    url=BUY_STARS_URL,
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🏠 Bosh menyu",
+                    callback_data="home",
+                )
+            ],
+        ])
 
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    "⭐ 50 Stars",
-                    callback_data="buy_50"
-                ),
-                InlineKeyboardButton(
-                    "⭐ 100 Stars",
-                    callback_data="buy_100"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "⭐ 200 Stars",
-                    callback_data="buy_200"
-                ),
-                InlineKeyboardButton(
-                    "⭐ 500 Stars",
-                    callback_data="buy_500"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "⭐ 1000 Stars",
-                    callback_data="buy_1000"
-                ),
-                InlineKeyboardButton(
-                    "⭐ 2000 Stars",
-                    callback_data="buy_2000"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "⭐ 5000 Stars",
-                    callback_data="buy_5000"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "💳 Sotib olish",
-                    url=BUY_STARS_URL
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    "⬅️ Orqaga",
-                    callback_data="home"
-                )
-            ]
-        ]
-
-        await q.message.reply_text(
+        await query.message.reply_text(
             "⭐ <b>STARS OLISH</b>\n\n"
-            "Kerakli Stars paketini tanlang:",
+            "Stars sotib olish uchun quyidagi tugmani bosing.",
+            reply_markup=keyboard,
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(
-                keyboard
-            )
         )
 
         return
 
-    # ======================================================
-    # BUY PACKAGE
-    # ======================================================
+    # -----------------------------------------------------
+    # BALANCE
+    # -----------------------------------------------------
 
-    if data.startswith("buy_"):
+    if data == "balance":
+        row = get_user(user.id)
 
-        amount = data.replace(
-            "buy_",
-            ""
-        )
+        points = row[2] if row else 0
 
-        await q.message.reply_text(
-            f"⭐ <b>{amount} Stars</b>\n\n"
-            "Sotib olish uchun quyidagi tugmadan "
-            "foydalaning:",
-            parse_mode="HTML",
+        await query.message.reply_text(
+            "💰 <b>Sizning balansingiz</b>\n\n"
+            f"⭐ Stars: <b>{points:.2f}</b>",
             reply_markup=InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton(
-                        "💳 Sotib olish",
-                        url=BUY_STARS_URL
+                        "🏠 Bosh menyu",
+                        callback_data="home",
                     )
                 ]
-            ])
+            ]),
+            parse_mode="HTML",
         )
 
         return
 
-    # ======================================================
-    # BALANCE
-    # ======================================================
-
-    if data == "balance":
-
-        row = get_user(
-            user.id
-        )
-
-        points = (
-            row[2]
-            if row
-            else 0
-        )
-
-        referrals = (
-            row[5]
-            if row
-            else 0
-        )
-
-        await q.message.reply_text(
-            "💰 <b>BALANS</b>\n\n"
-            f"⭐ Stars: <b>{points:.2f}</b>\n"
-            f"👥 Referallar: <b>{referrals}</b>\n\n"
-            "Stars yig‘ish uchun «🎯 STARS ISHLASH» "
-            "bo‘limiga kiring.",
-            parse_mode="HTML"
-        )
-
-        return
-
-    # ======================================================
+    # -----------------------------------------------------
     # PROFILE
-    # ======================================================
+    # -----------------------------------------------------
 
     if data == "profile":
-
-        row = get_user(
-            user.id
-        )
+        row = get_user(user.id)
 
         if not row:
             return
 
-        await q.message.reply_text(
+        username = row[1] or "yo'q"
+        points = row[2]
+        games = row[3]
+        wins = row[4]
+        referrals = row[5]
+
+        await query.message.reply_text(
             "👤 <b>PROFIL</b>\n\n"
             f"🆔 ID: <code>{user.id}</code>\n"
-            f"👤 Username: @{user.username or 'yo‘q'}\n"
-            f"⭐ Stars: <b>{row[2]:.2f}</b>\n"
-            f"🎮 O‘yinlar: <b>{row[3]}</b>\n"
-            f"🏆 G‘alabalar: <b>{row[4]}</b>\n"
-            f"👥 Referallar: <b>{row[5]}</b>",
-            parse_mode="HTML"
+            f"👤 Username: @{username}\n"
+            f"⭐ Stars: <b>{points:.2f}</b>\n"
+            f"🎮 O'yinlar: <b>{games}</b>\n"
+            f"🏆 G'alabalar: <b>{wins}</b>\n"
+            f"👥 Referallar: <b>{referrals}</b>",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "🏠 Bosh menyu",
+                        callback_data="home",
+                    )
+                ]
+            ]),
+            parse_mode="HTML",
         )
 
         return
 
-    # ======================================================
+    # -----------------------------------------------------
     # REFERRAL
-    # ======================================================
+    # -----------------------------------------------------
 
     if data == "ref":
-
         bot_info = await context.bot.get_me()
 
         link = (
@@ -2275,42 +1718,43 @@ async def menu(
             f"?start={user.id}"
         )
 
-        row = get_user(
-            user.id
-        )
+        row = get_user(user.id)
 
-        refs = (
-            row[5]
-            if row
-            else 0
-        )
+        referrals = row[5] if row else 0
 
-        await q.message.reply_text(
+        await query.message.reply_text(
             "👥 <b>REFERAL TIZIMI</b>\n\n"
-            f"Har bir taklif uchun: ⭐ "
-            f"<b>{REFERRAL_REWARD:g}</b>\n"
-            f"Sizning referallaringiz: <b>{refs}</b>\n\n"
-            "🔗 Sizning havolangiz:\n"
-            f"<code>{link}</code>\n\n"
-            "Havolani do‘stlaringizga yuboring.",
-            parse_mode="HTML"
+            f"Har bir taklif qilingan do'st uchun "
+            f"<b>{REFERRAL_REWARD}</b> ⭐ beriladi.\n\n"
+            f"👥 Sizning referallaringiz: <b>{referrals}</b>\n\n"
+            f"🔗 Sizning havolangiz:\n"
+            f"<code>{link}</code>",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "🏠 Bosh menyu",
+                        callback_data="home",
+                    )
+                ]
+            ]),
+            parse_mode="HTML",
         )
 
         return
 
-    # ======================================================
+    # -----------------------------------------------------
     # TASKS
-    # ======================================================
+    # -----------------------------------------------------
 
     if data == "tasks":
-
         con = db()
+
         cur = con.cursor()
 
         cur.execute("""
-        SELECT id, text, reward, url
-        FROM tasks
-        ORDER BY id DESC
+            SELECT id, text, reward, url
+            FROM tasks
+            ORDER BY id DESC
         """)
 
         tasks = cur.fetchall()
@@ -2318,1229 +1762,968 @@ async def menu(
         con.close()
 
         if not tasks:
-
-            await q.message.reply_text(
-                "🎁 Hozircha topshiriqlar yo‘q."
+            await query.message.reply_text(
+                "🎁 <b>TOPSHIRIQLAR</b>\n\n"
+                "Hozircha topshiriqlar mavjud emas.",
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton(
+                            "🏠 Bosh menyu",
+                            callback_data="home",
+                        )
+                    ]
+                ]),
+                parse_mode="HTML",
             )
 
             return
 
+        keyboard = []
+
         for task_id, text, reward, url in tasks:
-
-            keyboard = [
-                [
-                    InlineKeyboardButton(
-                        "📲 Topshiriq",
-                        url=url
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        f"✅ Bajardim (+{reward:g} ⭐)",
-                        callback_data=f"taskdone_{task_id}"
-                    )
-                ]
-            ]
-
-            await q.message.reply_text(
-                f"🎁 <b>Topshiriq #{task_id}</b>\n\n"
-                f"{text}\n\n"
-                f"💰 Mukofot: ⭐ <b>{reward:g}</b>",
-                parse_mode="HTML",
-                reply_markup=InlineKeyboardMarkup(
-                    keyboard
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"🎁 {text[:30]}",
+                    callback_data=f"taskdone_{task_id}",
                 )
+            ])
+
+        keyboard.append([
+            InlineKeyboardButton(
+                "🏠 Bosh menyu",
+                callback_data="home",
             )
+        ])
+
+        await query.message.reply_text(
+            "🎁 <b>TOPSHIRIQLAR</b>\n\n"
+            "Topshiriqni tanlang:",
+            reply_markup=InlineKeyboardMarkup(
+                keyboard
+            ),
+            parse_mode="HTML",
+        )
 
         return
 
-    # ======================================================
+    # -----------------------------------------------------
     # TASK DONE
-    # ======================================================
+    # -----------------------------------------------------
 
     if data.startswith("taskdone_"):
-
         try:
-
             task_id = int(
-                data.replace(
-                    "taskdone_",
-                    ""
-                )
+                data.split("_")[1]
             )
-
-        except ValueError:
-
+        except Exception:
             return
 
         con = db()
+
         cur = con.cursor()
 
         cur.execute("""
-        SELECT reward
-        FROM tasks
-        WHERE id=?
-        """, (
-            task_id,
-        ))
+            SELECT text, reward, url
+            FROM tasks
+            WHERE id = ?
+        """, (task_id,))
 
         task = cur.fetchone()
 
         if not task:
-
             con.close()
 
-            await q.message.reply_text(
+            await query.message.reply_text(
                 "❌ Topshiriq topilmadi."
             )
 
             return
 
-        reward = float(
-            task[0]
-        )
+        text_task, reward, url = task
 
         cur.execute("""
-        SELECT 1
-        FROM task_claims
-        WHERE user_id=? AND task_id=?
+            SELECT 1
+            FROM task_claims
+            WHERE user_id = ?
+              AND task_id = ?
         """, (
             user.id,
-            task_id
+            task_id,
         ))
 
-        already = cur.fetchone()
+        claimed = cur.fetchone()
 
-        if already:
-
+        if claimed:
             con.close()
 
-            await q.message.reply_text(
-                "⚠️ Bu topshiriq uchun Stars olgansiz."
+            await query.message.reply_text(
+                "⚠️ Siz bu topshiriq uchun mukofot olgansiz."
             )
 
             return
 
         cur.execute("""
-        INSERT INTO task_claims
-        (user_id, task_id, created_at)
-        VALUES (?, ?, ?)
+            INSERT INTO task_claims
+            (user_id, task_id, created_at)
+            VALUES (?, ?, ?)
         """, (
             user.id,
             task_id,
-            now()
+            now(),
         ))
 
         cur.execute("""
-        UPDATE users
-        SET points=points+?
-        WHERE id=?
+            UPDATE users
+            SET points = points + ?
+            WHERE id = ?
         """, (
             reward,
-            user.id
+            user.id,
         ))
 
         con.commit()
         con.close()
 
-        await q.message.reply_text(
-            f"🎉 Topshiriq qabul qilindi!\n\n"
-            f"⭐ +{reward:g} Stars qo‘shildi.",
-            parse_mode="HTML"
+        keyboard = []
+
+        if url:
+            keyboard.append([
+                InlineKeyboardButton(
+                    "📢 Topshiriqni ochish",
+                    url=url,
+                )
+            ])
+
+        keyboard.append([
+            InlineKeyboardButton(
+                "🏠 Bosh menyu",
+                callback_data="home",
+            )
+        ])
+
+        await query.message.reply_text(
+            "🎉 <b>Topshiriq bajarildi!</b>\n\n"
+            f"⭐ Mukofot: <b>{reward}</b> Stars",
+            reply_markup=InlineKeyboardMarkup(
+                keyboard
+            ),
+            parse_mode="HTML",
         )
 
         await save_database()
 
         return
 
-    # ======================================================
+    # -----------------------------------------------------
     # RATING
-    # ======================================================
+    # -----------------------------------------------------
 
     if data == "rating":
-
         con = db()
+
         cur = con.cursor()
 
         cur.execute("""
-        SELECT username, points
-        FROM users
-        ORDER BY points DESC
-        LIMIT 10
+            SELECT id, username, points
+            FROM users
+            ORDER BY points DESC
+            LIMIT 10
         """)
 
-        rows = cur.fetchall()
+        users = cur.fetchall()
 
         con.close()
 
-        text = "🏆 <b>TOP 10 REYTING</b>\n\n"
+        text = "🏆 <b>REYTING</b>\n\n"
 
-        if not rows:
-
-            text += "Hali foydalanuvchilar yo‘q."
-
+        if not users:
+            text += "Hali foydalanuvchilar yo'q."
         else:
-
-            for i, (
-                username,
-                points
-            ) in enumerate(
-                rows,
-                start=1
+            for i, (uid, username, points) in enumerate(
+                users,
+                start=1,
             ):
-
                 name = (
                     f"@{username}"
                     if username
-                    else "Foydalanuvchi"
+                    else str(uid)
                 )
 
                 text += (
                     f"{i}. {name} — "
-                    f"⭐ {points:.2f}\n"
+                    f"<b>{points:.2f} ⭐</b>\n"
                 )
 
-        await q.message.reply_text(
+        await query.message.reply_text(
             text,
-            parse_mode="HTML"
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "🏠 Bosh menyu",
+                        callback_data="home",
+                    )
+                ]
+            ]),
+            parse_mode="HTML",
         )
 
         return
 
-    # ======================================================
+    # -----------------------------------------------------
     # WITHDRAW
-    # ======================================================
+    # -----------------------------------------------------
 
     if data == "withdraw":
+        row = get_user(user.id)
 
-        row = get_user(
-            user.id
-        )
-
-        if not row:
-            return
-
-        points = float(
-            row[2]
-        )
-
-        referrals = int(
-            row[5]
-        )
+        points = row[2] if row else 0
+        referrals = row[5] if row else 0
 
         if points < MIN_WITHDRAW:
-
-            await q.message.reply_text(
-                f"💸 Yechish uchun kamida "
-                f"⭐ <b>{MIN_WITHDRAW:g}</b> kerak.\n\n"
-                f"Sizda: ⭐ <b>{points:.2f}</b>",
-                parse_mode="HTML"
+            await query.message.reply_text(
+                "💸 <b>YECHIB OLISH</b>\n\n"
+                f"❌ Minimal yechish: <b>{MIN_WITHDRAW:.0f} ⭐</b>\n"
+                f"⭐ Sizning balansingiz: <b>{points:.2f} ⭐</b>",
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton(
+                            "🏠 Bosh menyu",
+                            callback_data="home",
+                        )
+                    ]
+                ]),
+                parse_mode="HTML",
             )
 
             return
 
         if referrals < MIN_REFERRALS:
-
-            await q.message.reply_text(
-                f"👥 Yechish uchun kamida "
-                f"<b>{MIN_REFERRALS}</b> ta referral kerak.\n\n"
-                f"Sizda: <b>{referrals}</b>",
-                parse_mode="HTML"
+            await query.message.reply_text(
+                "💸 <b>YECHIB OLISH</b>\n\n"
+                f"❌ Kamida <b>{MIN_REFERRALS}</b> ta "
+                "referal kerak.\n\n"
+                f"👥 Sizda: <b>{referrals}</b>",
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton(
+                            "🏠 Bosh menyu",
+                            callback_data="home",
+                        )
+                    ]
+                ]),
+                parse_mode="HTML",
             )
 
             return
 
-        con = db()
-        cur = con.cursor()
+        context.user_data[
+            "withdraw_amount"
+        ] = points
 
-        cur.execute("""
-        SELECT id
-        FROM withdrawals
-        WHERE user_id=?
-        AND status='pending'
-        """, (
-            user.id,
-        ))
-
-        pending = cur.fetchone()
-
-        con.close()
-
-        if pending:
-
-            await q.message.reply_text(
-                "⏳ Sizda allaqachon kutayotgan "
-                "yechish so‘rovi bor."
-            )
-
-            return
-
-        con = db()
-        cur = con.cursor()
-
-        cur.execute("""
-        UPDATE users
-        SET points=points-?
-        WHERE id=?
-        AND points>=?
-        """, (
-            MIN_WITHDRAW,
-            user.id,
-            MIN_WITHDRAW
-        ))
-
-        if cur.rowcount == 0:
-
-            con.close()
-
-            await q.message.reply_text(
-                "❌ Balans yetarli emas."
-            )
-
-            return
-
-        cur.execute("""
-        INSERT INTO withdrawals
-        (user_id, amount, status, created_at)
-        VALUES (?, ?, 'pending', ?)
-        """, (
-            user.id,
-            MIN_WITHDRAW,
-            now()
-        ))
-
-        withdrawal_id = cur.lastrowid
-
-        con.commit()
-        con.close()
-
-        await q.message.reply_text(
-            "✅ <b>Yechish so‘rovingiz muvaffaqiyatli qabul qilindi!</b>\n\n"
-            "💰 Miqdor: ⭐ <b>200</b>\n"
-            "⏳ 24 soat ichida ko‘rib chiqiladi.",
-            parse_mode="HTML"
+        await query.message.reply_text(
+            "💸 <b>Yechib olish so'rovi</b>\n\n"
+            f"⭐ Miqdor: <b>{points:.2f} Stars</b>\n\n"
+            "Telegram username yoki to'lov uchun kerakli "
+            "ma'lumotni yuboring.",
+            parse_mode="HTML",
         )
-
-        if ADMIN_ID:
-
-            keyboard = InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton(
-                        "✅ Tasdiqlash",
-                        callback_data=f"approve_{withdrawal_id}"
-                    ),
-                    InlineKeyboardButton(
-                        "❌ Rad etish",
-                        callback_data=f"reject_{withdrawal_id}"
-                    )
-                ]
-            ])
-
-            try:
-
-                await context.bot.send_message(
-                    ADMIN_ID,
-                    "💸 <b>Yangi YECHISH SO‘ROVI</b>\n\n"
-                    f"🆔 User ID: <code>{user.id}</code>\n"
-                    f"👤 @{user.username or 'yo‘q'}\n"
-                    f"⭐ Miqdor: <b>{MIN_WITHDRAW:g}</b>\n"
-                    f"📄 So‘rov: <b>#{withdrawal_id}</b>",
-                    parse_mode="HTML",
-                    reply_markup=keyboard
-                )
-
-            except TelegramError as e:
-
-                log.error(
-                    "Admin notification error: %s",
-                    e
-                )
-
-        await save_database()
 
         return
 
-    # ======================================================
-    # APPROVE
-    # ======================================================
-
-    if data.startswith("approve_"):
-
-        if user.id != ADMIN_ID:
-            return
-
-        try:
-
-            withdrawal_id = int(
-                data.replace(
-                    "approve_",
-                    ""
-                )
-            )
-
-        except ValueError:
-
-            return
-
-        con = db()
-        cur = con.cursor()
-
-        cur.execute("""
-        SELECT user_id, amount, status
-        FROM withdrawals
-        WHERE id=?
-        """, (
-            withdrawal_id,
-        ))
-
-        withdrawal = cur.fetchone()
-
-        if not withdrawal:
-
-            con.close()
-
-            await q.message.reply_text(
-                "❌ So‘rov topilmadi."
-            )
-
-            return
-
-        target_user, amount, status = withdrawal
-
-        if status != "pending":
-
-            con.close()
-
-            await q.message.reply_text(
-                "⚠️ Bu so‘rov allaqachon ko‘rib chiqilgan."
-            )
-
-            return
-
-        cur.execute("""
-        UPDATE withdrawals
-        SET status='approved'
-        WHERE id=?
-        """, (
-            withdrawal_id,
-        ))
-
-        con.commit()
-        con.close()
-
-        await q.message.reply_text(
-            f"✅ So‘rov #{withdrawal_id} tasdiqlandi."
-        )
-
-        try:
-
-            await context.bot.send_message(
-                target_user,
-                "🎉 <b>Yechish so‘rovingiz tasdiqlandi!</b>\n\n"
-                f"⭐ Miqdor: <b>{amount:g}</b>\n\n"
-                "Admin tomonidan tasdiqlandi.",
-                parse_mode="HTML"
-            )
-
-        except TelegramError:
-            pass
-
-        await save_database()
-
-        return
-
-    # ======================================================
-    # REJECT
-    # ======================================================
-
-    if data.startswith("reject_"):
-
-        if user.id != ADMIN_ID:
-            return
-
-        try:
-
-            withdrawal_id = int(
-                data.replace(
-                    "reject_",
-                    ""
-                )
-            )
-
-        except ValueError:
-
-            return
-
-        con = db()
-        cur = con.cursor()
-
-        cur.execute("""
-        SELECT user_id, amount, status
-        FROM withdrawals
-        WHERE id=?
-        """, (
-            withdrawal_id,
-        ))
-
-        withdrawal = cur.fetchone()
-
-        if not withdrawal:
-
-            con.close()
-
-            await q.message.reply_text(
-                "❌ So‘rov topilmadi."
-            )
-
-            return
-
-        target_user, amount, status = withdrawal
-
-        if status != "pending":
-
-            con.close()
-
-            await q.message.reply_text(
-                "⚠️ Bu so‘rov allaqachon ko‘rib chiqilgan."
-            )
-
-            return
-
-        cur.execute("""
-        UPDATE withdrawals
-        SET status='rejected'
-        WHERE id=?
-        """, (
-            withdrawal_id,
-        ))
-
-        cur.execute("""
-        UPDATE users
-        SET points=points+?
-        WHERE id=?
-        """, (
-            amount,
-            target_user
-        ))
-
-        con.commit()
-        con.close()
-
-        await q.message.reply_text(
-            f"❌ So‘rov #{withdrawal_id} rad etildi.\n"
-            f"⭐ {amount:g} Stars balansga qaytarildi."
-        )
-
-        try:
-
-            await context.bot.send_message(
-                target_user,
-                "❌ <b>Yechish so‘rovingiz rad etildi.</b>\n\n"
-                f"⭐ {amount:g} Stars balansingizga qaytarildi.",
-                parse_mode="HTML"
-            )
-
-        except TelegramError:
-            pass
-
-        await save_database()
-
-        return
-
-    # ======================================================
+    # -----------------------------------------------------
     # GAMES
-    # ======================================================
+    # -----------------------------------------------------
 
     if data == "games":
-
-        await q.message.reply_text(
-            "🎯 <b>STARS ISHLASH</b>\n\n"
-            "⚠️ O‘yinlar avvalgidan qiyinroq.\n"
-            "To‘g‘ri javob bersangiz ⭐ Stars olasiz.\n\n"
-            "⏳ Har bir o‘yin orasida cooldown bor.",
+        await query.message.reply_text(
+            "🎮 <b>O'YINLAR</b>\n\n"
+            "O'yinni tanlang:",
+            reply_markup=games_menu(),
             parse_mode="HTML",
-            reply_markup=games_menu()
         )
 
         return
-
-    # ======================================================
-    # START GAME
-    # ======================================================
 
     if data.startswith("game_"):
-
-        game = data.replace(
+        game_id = data.replace(
             "game_",
-            ""
+            "",
+            1,
         )
 
-        valid = [
-            x[1]
-            for x in GAMES
-        ]
-
-        if game not in valid:
-            return
-
-        await start_game(
-            update,
-            context,
-            game
-        )
+        if game_id in GAMES:
+            await start_game(
+                query,
+                context,
+                game_id,
+            )
 
         return
 
-    # ======================================================
-    # QUIZ
-    # ======================================================
-
-    if data.startswith("answer_"):
-
-        game = context.user_data.get(
-            "game"
-        )
-
-        if not game:
-            return
-
-        try:
-
-            selected = int(
-                data.replace(
-                    "answer_",
-                    ""
-                )
-            )
-
-        except ValueError:
-
-            return
-
-        if selected == game["correct"]:
-
-            reward = game["reward"]
-
-            await change_points(
-                user.id,
-                reward
-            )
-
-            await game_result(
-                user.id,
-                True
-            )
-
-            context.user_data.pop(
-                "game",
-                None
-            )
-
-            await q.message.reply_text(
-                f"🎉 <b>TO‘G‘RI!</b>\n\n"
-                f"⭐ +{reward:g} Stars",
-                parse_mode="HTML"
-            )
-
-        else:
-
-            await game_result(
-                user.id,
-                False
-            )
-
-            context.user_data.pop(
-                "game",
-                None
-            )
-
-            await q.message.reply_text(
-                "❌ Noto‘g‘ri javob."
-            )
-
-        await save_database()
-
-        return
-
-    # ======================================================
-    # LOGIC
-    # ======================================================
-
-    if data.startswith("logic_"):
-
-        game = context.user_data.get(
-            "game"
-        )
-
-        if not game:
-            return
-
-        try:
-
-            selected = int(
-                data.replace(
-                    "logic_",
-                    ""
-                )
-            )
-
-        except ValueError:
-
-            return
-
-        if selected == game["correct"]:
-
-            reward = game["reward"]
-
-            await change_points(
-                user.id,
-                reward
-            )
-
-            await game_result(
-                user.id,
-                True
-            )
-
-            await q.message.reply_text(
-                f"🧠 🎉 To‘g‘ri!\n"
-                f"⭐ +{reward:g} Stars",
-                parse_mode="HTML"
-            )
-
-        else:
-
-            await game_result(
-                user.id,
-                False
-            )
-
-            await q.message.reply_text(
-                "❌ Mantiqiy javob noto‘g‘ri."
-            )
-
-        context.user_data.pop(
-            "game",
-            None
-        )
-
-        await save_database()
-
-        return
-
-    # ======================================================
-    # TARGET
-    # ======================================================
-
-    if data.startswith("target_"):
-
-        game = context.user_data.get(
-            "game"
-        )
-
-        if not game:
-            return
-
-        try:
-
-            selected = int(
-                data.replace(
-                    "target_",
-                    ""
-                )
-            )
-
-        except ValueError:
-
-            return
-
-        correct = (
-            selected == game["correct"]
-        )
-
-        if correct:
-
-            reward = game["reward"]
-
-            await change_points(
-                user.id,
-                reward
-            )
-
-            await game_result(
-                user.id,
-                True
-            )
-
-            await q.message.reply_text(
-                f"🎯 🎉 Nishon topildi!\n"
-                f"⭐ +{reward:g} Stars",
-                parse_mode="HTML"
-            )
-
-        else:
-
-            await game_result(
-                user.id,
-                False
-            )
-
-            await q.message.reply_text(
-                "❌ Nishon noto‘g‘ri."
-            )
-
-        context.user_data.pop(
-            "game",
-            None
-        )
-
-        await save_database()
-
-        return
-
-    # ======================================================
-    # ATTENTION
-    # ======================================================
-
-    if data.startswith("attention_"):
-
-        game = context.user_data.get(
-            "game"
-        )
-
-        if not game:
-            return
-
-        try:
-
-            selected = int(
-                data.replace(
-                    "attention_",
-                    ""
-                )
-            )
-
-        except ValueError:
-
-            return
-
-        if selected == game["correct"]:
-
-            reward = game["reward"]
-
-            await change_points(
-                user.id,
-                reward
-            )
-
-            await game_result(
-                user.id,
-                True
-            )
-
-            await q.message.reply_text(
-                f"👀 🎉 Diqqat yaxshi!\n"
-                f"⭐ +{reward:g} Stars",
-                parse_mode="HTML"
-            )
-
-        else:
-
-            await game_result(
-                user.id,
-                False
-            )
-
-            await q.message.reply_text(
-                "❌ Noto‘g‘ri raqam."
-            )
-
-        context.user_data.pop(
-            "game",
-            None
-        )
-
-        await save_database()
-
-        return
-
-    # ======================================================
-    # COLOR
-    # ======================================================
-
-    if data.startswith("color_"):
-
-        game = context.user_data.get(
-            "game"
-        )
-
-        if not game:
-            return
-
-        selected = data.replace(
-            "color_",
-            ""
-        )
-
-        if selected == game["correct"]:
-
-            reward = game["reward"]
-
-            await change_points(
-                user.id,
-                reward
-            )
-
-            await game_result(
-                user.id,
-                True
-            )
-
-            await q.message.reply_text(
-                f"🎨 🎉 To‘g‘ri rang!\n"
-                f"⭐ +{reward:g} Stars",
-                parse_mode="HTML"
-            )
-
-        else:
-
-            await game_result(
-                user.id,
-                False
-            )
-
-            await q.message.reply_text(
-                "❌ Noto‘g‘ri rang."
-            )
-
-        context.user_data.pop(
-            "game",
-            None
-        )
-
-        await save_database()
-
-        return
-
-    # ======================================================
-    # KNOWLEDGE
-    # ======================================================
-
-    if data.startswith("knowledge_"):
-
-        game = context.user_data.get(
-            "game"
-        )
-
-        if not game:
-            return
-
-        try:
-
-            selected = int(
-                data.replace(
-                    "knowledge_",
-                    ""
-                )
-            )
-
-        except ValueError:
-
-            return
-
-        if selected == game["correct"]:
-
-            reward = game["reward"]
-
-            await change_points(
-                user.id,
-                reward
-            )
-
-            await game_result(
-                user.id,
-                True
-            )
-
-            await q.message.reply_text(
-                f"📚 🎉 To‘g‘ri!\n"
-                f"⭐ +{reward:g} Stars",
-                parse_mode="HTML"
-            )
-
-        else:
-
-            await game_result(
-                user.id,
-                False
-            )
-
-            await q.message.reply_text(
-                "❌ Noto‘g‘ri javob."
-            )
-
-        context.user_data.pop(
-            "game",
-            None
-        )
-
-        await save_database()
-
-        return
-
-    # ======================================================
-    # CHOICE
-    # ======================================================
+    # -----------------------------------------------------
+    # QUIZ CHOICE
+    # -----------------------------------------------------
 
     if data.startswith("choice_"):
-
-        game = context.user_data.get(
-            "game"
-        )
-
-        if not game:
+        try:
+            index = int(
+                data.split("_")[1]
+            )
+        except Exception:
             return
 
-        selected = data.replace(
-            "choice_",
-            ""
+        options = context.user_data.get(
+            "choice_options",
+            [],
         )
 
-        if selected == game["correct"]:
+        game_data = context.user_data.get(
+            "game_data"
+        )
 
-            reward = game["reward"]
+        if not game_data or index >= len(options):
+            return
+
+        answer = game_data.get(
+            "answer"
+        )
+
+        selected = options[index]
+
+        if selected == answer:
+            reward = 1.5
 
             await change_points(
                 user.id,
-                reward
+                reward,
             )
 
             await game_result(
                 user.id,
-                True
+                True,
             )
 
-            await q.message.reply_text(
-                f"⚡ 🎉 To‘g‘ri tanlov!\n"
-                f"⭐ +{reward:g} Stars",
-                parse_mode="HTML"
+            await query.message.reply_text(
+                "🎉 <b>To'g'ri javob!</b>\n\n"
+                f"⭐ +{reward} Stars",
+                parse_mode="HTML",
             )
-
         else:
-
             await game_result(
                 user.id,
-                False
+                False,
             )
 
-            await q.message.reply_text(
-                "❌ Noto‘g‘ri tanlov."
+            await query.message.reply_text(
+                f"❌ Noto'g'ri.\n\n"
+                f"To'g'ri javob: <b>{answer}</b>",
+                parse_mode="HTML",
             )
 
         context.user_data.pop(
             "game",
-            None
+            None,
+        )
+
+        context.user_data.pop(
+            "game_data",
+            None,
         )
 
         await save_database()
 
         return
 
-    # ======================================================
-    # OTHER GAMES
-    # ======================================================
+    # -----------------------------------------------------
+    # LOGIC
+    # -----------------------------------------------------
 
-    if data == "other_games":
+    if data.startswith("logic_"):
+        try:
+            index = int(
+                data.split("_")[1]
+            )
+        except Exception:
+            return
 
-        await q.message.reply_text(
-            "🎮 <b>O‘YINLAR</b>\n\n"
-            "Bu bo‘limdagi mavjud o‘yinlarni "
-            "keyingi versiyalarda kengaytirish mumkin.",
-            parse_mode="HTML"
+        options = context.user_data.get(
+            "logic_options",
+            [],
         )
+
+        game_data = context.user_data.get(
+            "game_data"
+        )
+
+        if not game_data or index >= len(options):
+            return
+
+        selected = options[index]
+
+        answer = game_data.get(
+            "answer"
+        )
+
+        if selected == answer:
+            reward = 1.5
+
+            await change_points(
+                user.id,
+                reward,
+            )
+
+            await game_result(
+                user.id,
+                True,
+            )
+
+            text = (
+                "🎉 <b>To'g'ri!</b>\n\n"
+                f"⭐ +{reward} Stars"
+            )
+        else:
+            await game_result(
+                user.id,
+                False,
+            )
+
+            text = (
+                "❌ Noto'g'ri.\n\n"
+                f"To'g'ri javob: <b>{answer}</b>"
+            )
+
+        context.user_data.pop(
+            "game",
+            None,
+        )
+
+        context.user_data.pop(
+            "game_data",
+            None,
+        )
+
+        await query.message.reply_text(
+            text,
+            parse_mode="HTML",
+        )
+
+        await save_database()
 
         return
 
-    # ======================================================
-    # ADMIN
-    # ======================================================
+    # -----------------------------------------------------
+    # TARGET
+    # -----------------------------------------------------
 
-    if data == "admin":
-
-        if user.id != ADMIN_ID:
+    if data.startswith("target_"):
+        try:
+            selected = int(
+                data.split("_")[1]
+            )
+        except Exception:
             return
 
-        keyboard = [
+        game_data = context.user_data.get(
+            "game_data"
+        )
+
+        if not game_data:
+            return
+
+        answer = game_data.get(
+            "answer"
+        )
+
+        if selected == answer:
+            reward = 2.0
+
+            await change_points(
+                user.id,
+                reward,
+            )
+
+            await game_result(
+                user.id,
+                True,
+            )
+
+            text = (
+                "🎯 <b>Nishonga tegdingiz!</b>\n\n"
+                f"⭐ +{reward} Stars"
+            )
+        else:
+            await game_result(
+                user.id,
+                False,
+            )
+
+            text = (
+                "❌ Noto'g'ri.\n\n"
+                f"To'g'ri raqam: <b>{answer}</b>"
+            )
+
+        context.user_data.pop(
+            "game",
+            None,
+        )
+
+        context.user_data.pop(
+            "game_data",
+            None,
+        )
+
+        await query.message.reply_text(
+            text,
+            parse_mode="HTML",
+        )
+
+        await save_database()
+
+        return
+
+    # -----------------------------------------------------
+    # COLOR
+    # -----------------------------------------------------
+
+    if data.startswith("color_"):
+        try:
+            index = int(
+                data.split("_")[1]
+            )
+        except Exception:
+            return
+
+        options = context.user_data.get(
+            "color_options",
+            [],
+        )
+
+        game_data = context.user_data.get(
+            "game_data"
+        )
+
+        if not game_data or index >= len(options):
+            return
+
+        selected = options[index]
+
+        answer = game_data.get(
+            "answer"
+        )
+
+        if selected.lower() == answer.lower():
+            reward = 1.2
+
+            await change_points(
+                user.id,
+                reward,
+            )
+
+            await game_result(
+                user.id,
+                True,
+            )
+
+            text = (
+                "🎨 <b>To'g'ri!</b>\n\n"
+                f"⭐ +{reward} Stars"
+            )
+        else:
+            await game_result(
+                user.id,
+                False,
+            )
+
+            text = (
+                "❌ Noto'g'ri.\n\n"
+                f"To'g'ri javob: <b>{answer}</b>"
+            )
+
+        context.user_data.pop(
+            "game",
+            None,
+        )
+
+        context.user_data.pop(
+            "game_data",
+            None,
+        )
+
+        await query.message.reply_text(
+            text,
+            parse_mode="HTML",
+        )
+
+        await save_database()
+
+        return
+
+    # -----------------------------------------------------
+    # KNOWLEDGE
+    # -----------------------------------------------------
+
+    if data.startswith("knowledge_"):
+        try:
+            index = int(
+                data.split("_")[1]
+            )
+        except Exception:
+            return
+
+        options = context.user_data.get(
+            "knowledge_options",
+            [],
+        )
+
+        game_data = context.user_data.get(
+            "game_data"
+        )
+
+        if not game_data or index >= len(options):
+            return
+
+        selected = options[index]
+
+        answer = game_data.get(
+            "answer"
+        )
+
+        if selected == answer:
+            reward = 1.5
+
+            await change_points(
+                user.id,
+                reward,
+            )
+
+            await game_result(
+                user.id,
+                True,
+            )
+
+            text = (
+                "📚 <b>To'g'ri!</b>\n\n"
+                f"⭐ +{reward} Stars"
+            )
+        else:
+            await game_result(
+                user.id,
+                False,
+            )
+
+            text = (
+                "❌ Noto'g'ri.\n\n"
+                f"To'g'ri javob: <b>{answer}</b>"
+            )
+
+        context.user_data.pop(
+            "game",
+            None,
+        )
+
+        context.user_data.pop(
+            "game_data",
+            None,
+        )
+
+        await query.message.reply_text(
+            text,
+            parse_mode="HTML",
+        )
+
+        await save_database()
+
+        return
+
+    # -----------------------------------------------------
+    # CHOICE ANSWER
+    # -----------------------------------------------------
+
+    if data.startswith("choiceanswer_"):
+        selected = data.replace(
+            "choiceanswer_",
+            "",
+            1,
+        )
+
+        answer = context.user_data.get(
+            "choice_answer"
+        )
+
+        if not answer:
+            return
+
+        if selected == answer:
+            reward = 1.0
+
+            await change_points(
+                user.id,
+                reward,
+            )
+
+            await game_result(
+                user.id,
+                True,
+            )
+
+            text = (
+                "🎯 <b>To'g'ri!</b>\n\n"
+                f"⭐ +{reward} Stars"
+            )
+        else:
+            await game_result(
+                user.id,
+                False,
+            )
+
+            text = "❌ Noto'g'ri tanlov."
+
+        context.user_data.pop(
+            "game",
+            None,
+        )
+
+        context.user_data.pop(
+            "game_data",
+            None,
+        )
+
+        context.user_data.pop(
+            "choice_answer",
+            None,
+        )
+
+        await query.message.reply_text(
+            text,
+            parse_mode="HTML",
+        )
+
+        await save_database()
+
+        return
+
+    # -----------------------------------------------------
+    # ADMIN PANEL
+    # -----------------------------------------------------
+
+    if data == "admin":
+        if user.id != ADMIN_ID:
+            await query.message.reply_text(
+                "❌ Siz admin emassiz."
+            )
+            return
+
+        keyboard = InlineKeyboardMarkup([
             [
                 InlineKeyboardButton(
                     "📊 STATISTIKA",
-                    callback_data="admin_stats"
+                    callback_data="admin_stats",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "👥 USERLAR",
-                    callback_data="admin_users"
+                    "👥 FOYDALANUVCHILAR",
+                    callback_data="admin_users",
                 )
             ],
             [
                 InlineKeyboardButton(
                     "📢 XABAR YUBORISH",
-                    callback_data="admin_broadcast"
+                    callback_data="admin_broadcast",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "➕ TOPSHIRIQ QO‘SHISH",
-                    callback_data="admin_addtask"
+                    "🎁 TOPSHIRIQ QO'SHISH",
+                    callback_data="admin_addtask",
                 )
             ],
             [
                 InlineKeyboardButton(
                     "📋 TOPSHIRIQLAR",
-                    callback_data="admin_tasks"
+                    callback_data="admin_tasks",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "⬅️ Bosh menyu",
-                    callback_data="home"
+                    "🏠 Bosh menyu",
+                    callback_data="home",
                 )
-            ]
-        ]
+            ],
+        ])
 
-        await q.message.reply_text(
-            "⚙️ <b>ADMIN PANEL</b>",
+        await query.message.reply_text(
+            "⚙️ <b>ADMIN PANEL</b>\n\n"
+            "Kerakli bo'limni tanlang:",
+            reply_markup=keyboard,
             parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup(
-                keyboard
-            )
         )
 
         return
 
-    # ======================================================
+    # -----------------------------------------------------
     # ADMIN STATS
-    # ======================================================
+    # -----------------------------------------------------
 
     if data == "admin_stats":
-
         if user.id != ADMIN_ID:
             return
 
         con = db()
         cur = con.cursor()
 
-        cur.execute(
-            "SELECT COUNT(*) FROM users"
-        )
-
-        users_count = cur.fetchone()[0]
-
-        cur.execute(
-            "SELECT SUM(points) FROM users"
-        )
-
-        total_points = (
-            cur.fetchone()[0]
-            or 0
-        )
-
-        cur.execute(
-            "SELECT SUM(referrals) FROM users"
-        )
-
-        referrals = (
-            cur.fetchone()[0]
-            or 0
-        )
+        cur.execute("""
+            SELECT COUNT(*)
+            FROM users
+        """)
+        current_users = cur.fetchone()[0]
 
         cur.execute("""
-        SELECT COUNT(*)
-        FROM withdrawals
-        WHERE status='pending'
+            SELECT total_users
+            FROM bot_stats
+            WHERE id = 1
         """)
-
-        pending = cur.fetchone()[0]
-
-        cur.execute("""
-        SELECT total_users
-        FROM bot_stats
-        WHERE id=1
-        """)
-
         row = cur.fetchone()
 
         total_since_start = (
             row[0]
             if row
-            else users_count
+            else current_users
         )
+
+        cur.execute("""
+            SELECT COALESCE(SUM(points), 0)
+            FROM users
+        """)
+        total_points = cur.fetchone()[0]
+
+        cur.execute("""
+            SELECT COALESCE(SUM(referrals), 0)
+            FROM users
+        """)
+        total_refs = cur.fetchone()[0]
+
+        cur.execute("""
+            SELECT COUNT(*)
+            FROM withdrawals
+            WHERE status = 'pending'
+        """)
+        pending_withdrawals = cur.fetchone()[0]
 
         con.close()
 
-        sponsor_active = await sponsor_is_active()
-
         try:
-
-            sponsor_count = await context.bot.get_chat_member_count(
-                SPONSOR_CHANNEL
+            sponsor_count = (
+                await context.bot.get_chat_member_count(
+                    SPONSOR_CHANNEL
+                )
             )
-
-        except TelegramError:
-
+        except Exception:
             sponsor_count = 0
 
-        sponsor_status = (
-            "🟢 FAOL"
-            if sponsor_active
-            else "🔴 O‘CHIRILGAN"
-        )
+        active = await sponsor_is_active()
 
-        await q.message.reply_text(
+        await query.message.reply_text(
             "📊 <b>BOT STATISTIKASI</b>\n\n"
-            f"👥 Hozirgi userlar: "
-            f"<b>{format_count(users_count)}</b>\n"
-            f"📈 Bot ochilgandan beri: "
+            f"👥 Hozirgi foydalanuvchilar: "
+            f"<b>{format_count(current_users)}</b>\n"
+            f"📈 Bot ishlagandan beri: "
             f"<b>{format_count(total_since_start)}</b>\n"
             f"⭐ Jami Stars: <b>{total_points:.2f}</b>\n"
-            f"👥 Jami referallar: <b>{referrals}</b>\n"
-            f"💸 Kutilayotgan yechish: "
-            f"<b>{pending}</b>\n\n"
-            f"📢 Homiy kanal: <b>{SPONSOR_CHANNEL}</b>\n"
-            f"👥 Homiy a'zolari: <b>{format_count(sponsor_count)}</b>\n"
-            f"🎯 Limit: <b>{SPONSOR_LIMIT}</b>\n"
-            f"🔐 Majburiy obuna: <b>{sponsor_status}</b>",
-            parse_mode="HTML"
+            f"👥 Jami referallar: "
+            f"<b>{format_count(total_refs)}</b>\n"
+            f"💸 Kutilayotgan yechishlar: "
+            f"<b>{pending_withdrawals}</b>\n\n"
+            f"📢 Homiy kanal: "
+            f"<b>{format_count(sponsor_count)}</b>\n"
+            f"🔢 Limit: "
+            f"<b>{format_count(SPONSOR_LIMIT)}</b>\n"
+            f"📌 Holat: "
+            f"<b>{'Faol' if active else 'O‘chirilgan'}</b>",
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "⬅️ Admin panel",
+                        callback_data="admin",
+                    )
+                ]
+            ]),
+            parse_mode="HTML",
         )
 
         return
 
-    # ======================================================
+    # -----------------------------------------------------
     # ADMIN USERS
-    # ======================================================
+    # -----------------------------------------------------
 
     if data == "admin_users":
-
         if user.id != ADMIN_ID:
             return
 
-        count = await get_total_users()
+        con = db()
+        cur = con.cursor()
 
-        await q.message.reply_text(
-            f"👥 <b>Bot ochilgandan beri jami:</b>\n\n"
-            f"👥 <b>{format_count(count)} ta foydalanuvchi</b>",
-            parse_mode="HTML"
+        cur.execute("""
+            SELECT
+                id,
+                username,
+                points,
+                referrals
+            FROM users
+            ORDER BY id DESC
+            LIMIT ?
+        """, (PAGE_SIZE,))
+
+        users = cur.fetchall()
+
+        cur.execute("""
+            SELECT COUNT(*)
+            FROM users
+        """)
+
+        total = cur.fetchone()[0]
+
+        con.close()
+
+        text = (
+            "👥 <b>FOYDALANUVCHILAR</b>\n\n"
+            f"Jami: <b>{format_count(total)}</b>\n\n"
+        )
+
+        for uid, username, points, referrals in users:
+            name = (
+                f"@{username}"
+                if username
+                else str(uid)
+            )
+
+            text += (
+                f"🆔 {uid} — {name}\n"
+                f"⭐ {points:.2f} | "
+                f"👥 {referrals}\n\n"
+            )
+
+        await query.message.reply_text(
+            text,
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "⬅️ Admin panel",
+                        callback_data="admin",
+                    )
+                ]
+            ]),
+            parse_mode="HTML",
         )
 
         return
 
-    # ======================================================
+    # -----------------------------------------------------
     # ADMIN BROADCAST
-    # ======================================================
+    # -----------------------------------------------------
 
     if data == "admin_broadcast":
-
         if user.id != ADMIN_ID:
             return
 
@@ -3548,364 +2731,506 @@ async def menu(
             "admin_action"
         ] = "broadcast"
 
-        await q.message.reply_text(
-            "📢 <b>Broadcast</b>\n\n"
-            "Yubormoqchi bo‘lgan xabaringizni "
-            "shu yerga yuboring.",
-            parse_mode="HTML"
+        await query.message.reply_text(
+            "📢 <b>Xabar yuborish</b>\n\n"
+            "Barcha foydalanuvchilarga yubormoqchi "
+            "bo'lgan xabaringizni yozing.",
+            parse_mode="HTML",
         )
 
         return
 
-    # ======================================================
+    # -----------------------------------------------------
     # ADMIN ADD TASK
-    # ======================================================
+    # -----------------------------------------------------
 
     if data == "admin_addtask":
-
         if user.id != ADMIN_ID:
             return
 
         context.user_data[
             "admin_action"
-        ] = "add_task"
+        ] = "addtask"
 
-        await q.message.reply_text(
-            "➕ <b>TOPSHIRIQ QO‘SHISH</b>\n\n"
+        await query.message.reply_text(
+            "🎁 <b>Topshiriq qo'shish</b>\n\n"
             "Quyidagi formatda yuboring:\n\n"
-            "<code>MATN | REWARD | URL</code>\n\n"
+            "<code>Matn | Mukofot | URL</code>\n\n"
             "Masalan:\n"
-            "<code>Kanalga obuna bo‘ling | 5 | https://t.me/example</code>",
-            parse_mode="HTML"
+            "<code>Kanalga obuna bo'ling | 5 | https://t.me/example</code>",
+            parse_mode="HTML",
         )
 
         return
 
-    # ======================================================
-    # ADMIN TASK LIST
-    # ======================================================
+    # -----------------------------------------------------
+    # ADMIN TASKS
+    # -----------------------------------------------------
 
     if data == "admin_tasks":
-
         if user.id != ADMIN_ID:
             return
 
         con = db()
+
         cur = con.cursor()
 
         cur.execute("""
-        SELECT id, text, reward, url
-        FROM tasks
-        ORDER BY id DESC
+            SELECT id, text, reward, url
+            FROM tasks
+            ORDER BY id DESC
         """)
 
-        rows = cur.fetchall()
+        tasks = cur.fetchall()
 
         con.close()
 
-        if not rows:
-
-            await q.message.reply_text(
-                "📋 Hali topshiriqlar yo‘q."
+        if not tasks:
+            text = (
+                "📋 <b>TOPSHIRIQLAR</b>\n\n"
+                "Topshiriqlar yo'q."
             )
+        else:
+            text = "📋 <b>TOPSHIRIQLAR</b>\n\n"
 
-            return
+            for task_id, task_text, reward, url in tasks:
+                text += (
+                    f"#{task_id} — {task_text}\n"
+                    f"⭐ {reward} | {url}\n\n"
+                )
 
-        text = "📋 <b>TOPSHIRIQLAR</b>\n\n"
-
-        for (
-            task_id,
-            task_text,
-            reward,
-            url
-        ) in rows:
-
-            text += (
-                f"#{task_id} — {task_text}\n"
-                f"⭐ {reward:g}\n"
-                f"{url}\n\n"
-            )
-
-        await q.message.reply_text(
+        await query.message.reply_text(
             text,
-            parse_mode="HTML"
+            reply_markup=InlineKeyboardMarkup([
+                [
+                    InlineKeyboardButton(
+                        "⬅️ Admin panel",
+                        callback_data="admin",
+                    )
+                ]
+            ]),
+            parse_mode="HTML",
         )
 
         return
 
 
-# ==========================================================
-# ADMIN TEXT / BROADCAST / TASK
-# ==========================================================
+# =========================================================
+# TEXT ROUTER
+# =========================================================
 
-async def admin_message(
-    update,
-    context
+async def text_router(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
 ):
-
     user = update.effective_user
 
     if not user:
         return
 
-    if user.id != ADMIN_ID:
-        return
+    text = update.message.text.strip()
 
-    if not update.message:
-        return
+    # -----------------------------------------------------
+    # ADMIN ACTIONS
+    # -----------------------------------------------------
 
-    action = context.user_data.get(
-        "admin_action"
-    )
+    if (
+        user.id == ADMIN_ID
+        and context.user_data.get(
+            "admin_action"
+        )
+    ):
 
-    if not action:
-        return
+        action = context.user_data.get(
+            "admin_action"
+        )
 
-    if action == "broadcast":
+        # -----------------------------------------------
+        # BROADCAST
+        # -----------------------------------------------
 
-        text = update.message.text
+        if action == "broadcast":
+            context.user_data.pop(
+                "admin_action",
+                None,
+            )
 
-        if not text:
+            con = db()
+
+            cur = con.cursor()
+
+            cur.execute("""
+                SELECT id
+                FROM users
+                WHERE blocked = 0
+            """)
+
+            users = [
+                row[0]
+                for row in cur.fetchall()
+            ]
+
+            con.close()
+
+            sent = 0
+            failed = 0
+
+            for uid in users:
+                try:
+                    await context.bot.send_message(
+                        uid,
+                        text,
+                    )
+
+                    sent += 1
+
+                    await asyncio.sleep(
+                        0.05
+                    )
+
+                except Forbidden:
+                    failed += 1
+
+                    con = db()
+
+                    con.execute("""
+                        UPDATE users
+                        SET blocked = 1
+                        WHERE id = ?
+                    """, (uid,))
+
+                    con.commit()
+                    con.close()
+
+                except RetryAfter as e:
+                    await asyncio.sleep(
+                        e.retry_after
+                    )
+
+                    try:
+                        await context.bot.send_message(
+                            uid,
+                            text,
+                        )
+
+                        sent += 1
+
+                    except Exception:
+                        failed += 1
+
+                except Exception:
+                    failed += 1
 
             await update.message.reply_text(
-                "❌ Faqat matnli xabar yuboring."
+                "📢 <b>Xabar yuborildi!</b>\n\n"
+                f"✅ Yuborildi: <b>{sent}</b>\n"
+                f"❌ Xato: <b>{failed}</b>",
+                parse_mode="HTML",
             )
 
             return
 
-        con = db()
-        cur = con.cursor()
+        # -----------------------------------------------
+        # ADD TASK
+        # -----------------------------------------------
 
-        cur.execute("""
-        SELECT id
-        FROM users
-        WHERE blocked=0
-        """)
-
-        users = cur.fetchall()
-
-        con.close()
-
-        sent = 0
-        blocked = 0
-
-        await update.message.reply_text(
-            f"📢 Xabar {len(users)} ta userga yuborilmoqda..."
-        )
-
-        for (
-            user_id,
-        ) in users:
-
-            try:
-
-                await context.bot.send_message(
-                    user_id,
-                    text
-                )
-
-                sent += 1
-
-                await asyncio.sleep(
-                    0.04
-                )
-
-            except Forbidden:
-
-                blocked += 1
-
-                con = db()
-                cur = con.cursor()
-
-                cur.execute("""
-                UPDATE users
-                SET blocked=1
-                WHERE id=?
-                """, (
-                    user_id,
-                ))
-
-                con.commit()
-                con.close()
-
-            except RetryAfter as e:
-
-                await asyncio.sleep(
-                    e.retry_after
-                )
-
-            except TelegramError as e:
-
-                log.error(
-                    "Broadcast error %s: %s",
-                    user_id,
-                    e
-                )
-
-        context.user_data.pop(
-            "admin_action",
-            None
-        )
-
-        await update.message.reply_text(
-            "✅ <b>Broadcast tugadi.</b>\n\n"
-            f"📨 Yuborildi: <b>{sent}</b>\n"
-            f"🚫 Bloklaganlar: <b>{blocked}</b>",
-            parse_mode="HTML"
-        )
-
-        await save_database()
-
-        return
-
-    if action == "add_task":
-
-        try:
+        if action == "addtask":
+            context.user_data.pop(
+                "admin_action",
+                None,
+            )
 
             parts = [
                 x.strip()
-                for x in update.message.text.split("|")
+                for x in text.split("|")
             ]
 
             if len(parts) != 3:
-                raise ValueError
+                await update.message.reply_text(
+                    "❌ Format noto'g'ri.\n\n"
+                    "To'g'ri format:\n"
+                    "<code>Matn | Mukofot | URL</code>",
+                    parse_mode="HTML",
+                )
+                return
 
-            text = parts[0]
-            reward = float(parts[1])
+            task_text = parts[0]
+
+            try:
+                reward = float(parts[1])
+            except Exception:
+                await update.message.reply_text(
+                    "❌ Mukofot raqam bo'lishi kerak."
+                )
+                return
+
             url = parts[2]
 
-            if not text or not url:
-                raise ValueError
+            con = db()
 
-        except (
-            ValueError,
-            AttributeError
-        ):
+            con.execute("""
+                INSERT INTO tasks
+                (text, reward, url)
+                VALUES (?, ?, ?)
+            """, (
+                task_text,
+                reward,
+                url,
+            ))
+
+            con.commit()
+            con.close()
 
             await update.message.reply_text(
-                "❌ Format noto‘g‘ri.\n\n"
-                "<code>MATN | REWARD | URL</code>",
-                parse_mode="HTML"
+                "✅ <b>Topshiriq qo'shildi!</b>\n\n"
+                f"🎁 {task_text}\n"
+                f"⭐ {reward} Stars\n"
+                f"🔗 {url}",
+                parse_mode="HTML",
             )
+
+            await save_database()
 
             return
 
+    # -----------------------------------------------------
+    # GAME ANSWERS
+    # -----------------------------------------------------
+
+    handled = await process_game_answer(
+        update,
+        context,
+        text,
+    )
+
+    if handled:
+        return
+
+    # -----------------------------------------------------
+    # WITHDRAW INFORMATION
+    # -----------------------------------------------------
+
+    if context.user_data.get(
+        "withdraw_amount"
+    ):
+
+        amount = context.user_data.pop(
+            "withdraw_amount"
+        )
+
+        row = get_user(user.id)
+
+        if not row:
+            return
+
+        balance = row[2]
+
+        if balance < MIN_WITHDRAW:
+            await update.message.reply_text(
+                "❌ Balansingiz yetarli emas."
+            )
+            return
+
         con = db()
+
         cur = con.cursor()
 
         cur.execute("""
-        INSERT INTO tasks
-        (text, reward, url)
-        VALUES (?, ?, ?)
+            INSERT INTO withdrawals
+            (user_id, amount, status, created_at)
+            VALUES (?, ?, 'pending', ?)
         """, (
-            text,
-            reward,
-            url
+            user.id,
+            amount,
+            now(),
         ))
 
-        task_id = cur.lastrowid
+        withdrawal_id = cur.lastrowid
+
+        cur.execute("""
+            UPDATE users
+            SET points = 0
+            WHERE id = ?
+        """, (user.id,))
 
         con.commit()
         con.close()
 
-        context.user_data.pop(
-            "admin_action",
-            None
+        await update.message.reply_text(
+            "✅ <b>So'rovingiz muvaffaqiyatli qabul qilindi!</b>\n\n"
+            f"⭐ Miqdor: <b>{amount:.2f} Stars</b>\n\n"
+            "⏳ 24 soat ichida ko'rib chiqilib, "
+            "to'lov amalga oshiriladi.",
+            parse_mode="HTML",
         )
 
-        await update.message.reply_text(
-            f"✅ Topshiriq #{task_id} qo‘shildi.\n\n"
-            f"🎁 {text}\n"
-            f"⭐ Reward: {reward:g}\n"
-            f"🔗 {url}",
-            parse_mode="HTML"
-        )
+        try:
+            await context.bot.send_message(
+                ADMIN_ID,
+                "💸 <b>Yangi yechish so'rovi!</b>\n\n"
+                f"🆔 So'rov: <code>{withdrawal_id}</code>\n"
+                f"👤 User ID: <code>{user.id}</code>\n"
+                f"👤 Username: @{user.username or 'yoq'}\n"
+                f"⭐ Miqdor: <b>{amount:.2f}</b>",
+                parse_mode="HTML",
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton(
+                            "✅ TASDIQLASH",
+                            callback_data=f"approve_{withdrawal_id}",
+                        ),
+                        InlineKeyboardButton(
+                            "❌ RAD ETISH",
+                            callback_data=f"reject_{withdrawal_id}",
+                        ),
+                    ]
+                ]),
+            )
+        except Exception:
+            pass
 
         await save_database()
 
         return
 
 
-# ==========================================================
-# TEXT ROUTER
-# ==========================================================
+# =========================================================
+# APPROVE / REJECT WITHDRAW
+# =========================================================
 
-async def text_router(
-    update,
-    context
+async def handle_withdraw_admin(
+    query,
+    context,
+    action,
+    withdrawal_id,
 ):
+    user = query.from_user
 
-    game = context.user_data.get(
-        "game"
-    )
+    if user.id != ADMIN_ID:
+        await query.message.reply_text(
+            "❌ Ruxsat yo'q."
+        )
+        return
 
-    if game:
+    con = db()
 
-        await process_game_answer(
-            update,
-            context
+    cur = con.cursor()
+
+    cur.execute("""
+        SELECT user_id, amount, status
+        FROM withdrawals
+        WHERE id = ?
+    """, (withdrawal_id,))
+
+    row = cur.fetchone()
+
+    if not row:
+        con.close()
+
+        await query.message.reply_text(
+            "❌ So'rov topilmadi."
         )
 
         return
 
-    action = context.user_data.get(
-        "admin_action"
-    )
+    target_user_id, amount, status = row
 
-    if action:
+    if status != "pending":
+        con.close()
 
-        await admin_message(
-            update,
-            context
+        await query.message.reply_text(
+            "⚠️ Bu so'rov allaqachon ko'rib chiqilgan."
         )
 
         return
 
+    if action == "approve":
+        cur.execute("""
+            UPDATE withdrawals
+            SET status = 'approved'
+            WHERE id = ?
+        """, (withdrawal_id,))
 
-# ==========================================================
-# ERROR
-# ==========================================================
+        message = (
+            "✅ <b>Yechish so'rovingiz tasdiqlandi!</b>\n\n"
+            f"⭐ Miqdor: <b>{amount:.2f} Stars</b>"
+        )
+
+    else:
+        cur.execute("""
+            UPDATE withdrawals
+            SET status = 'rejected'
+            WHERE id = ?
+        """, (withdrawal_id,))
+
+        cur.execute("""
+            UPDATE users
+            SET points = points + ?
+            WHERE id = ?
+        """, (
+            amount,
+            target_user_id,
+        ))
+
+        message = (
+            "❌ <b>Yechish so'rovingiz rad etildi.</b>\n\n"
+            f"⭐ {amount:.2f} Stars balansingizga qaytarildi."
+        )
+
+    con.commit()
+    con.close()
+
+    await query.message.reply_text(
+        "✅ So'rov holati yangilandi."
+    )
+
+    try:
+        await context.bot.send_message(
+            target_user_id,
+            message,
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+
+    await save_database()
+
+
+# =========================================================
+# ERROR HANDLER
+# =========================================================
 
 async def error_handler(
     update,
-    context
+    context,
 ):
-
-    error = context.error
-
-    log.error(
-        "Exception while handling update: %s",
-        error,
-        exc_info=True
+    logger.error(
+        "Exception while handling update:",
+        exc_info=context.error,
     )
 
 
-# ==========================================================
+# =========================================================
 # POST INIT
-# ==========================================================
+# =========================================================
 
 async def post_init(
-    application
+    application: Application,
 ):
-
     init_db()
 
-    # Public profilga user soni yozilmaydi
     await update_bot_user_count(
         application.bot
     )
 
-    # Homiy limitini darhol tekshirish
     await check_sponsor_limit(
         application.bot
     )
 
-    # Database backup
     application.create_task(
         periodic_database_backup()
     )
 
-    # Homiy kanalni har 60 sekund tekshirish
     application.create_task(
         periodic_sponsor_check(
             application.bot
@@ -3914,76 +3239,46 @@ async def post_init(
 
     await save_database()
 
-    total = await get_total_users()
+    try:
+        total = await get_total_users()
 
-    log.info(
-        "========================================"
-    )
-
-    log.info(
-        "Zerikdim Bot ishga tushdi."
-    )
-
-    log.info(
-        "Jami user: %s",
-        total
-    )
-
-    log.info(
-        "Homiya kanal: %s",
-        SPONSOR_CHANNEL
-    )
-
-    log.info(
-        "Homiya limit: %s",
-        SPONSOR_LIMIT
-    )
-
-    log.info(
-        "========================================"
-    )
+        logger.info(
+            "Bot started. Users: %s",
+            total,
+        )
+    except Exception:
+        pass
 
 
-# ==========================================================
+# =========================================================
 # POST SHUTDOWN
-# ==========================================================
+# =========================================================
 
 async def post_shutdown(
-    application
+    application: Application,
 ):
-
     try:
-
-        log.info(
-            "Bot yopilmoqda. Database backup..."
-        )
-
         await save_database()
-
     except Exception as e:
-
-        log.error(
-            "Shutdown backup error: %s",
-            e
+        logger.error(
+            "Shutdown save error: %s",
+            e,
         )
 
 
-# ==========================================================
+# =========================================================
 # MAIN
-# ==========================================================
+# =========================================================
 
 def main():
-
     if not TOKEN:
-
         raise RuntimeError(
             "BOT_TOKEN topilmadi!"
         )
 
     if not ADMIN_ID:
-
-        log.warning(
-            "ADMIN_ID sozlanmagan."
+        logger.warning(
+            "ADMIN_ID topilmadi!"
         )
 
     application = (
@@ -3997,7 +3292,7 @@ def main():
     application.add_handler(
         CommandHandler(
             "start",
-            start
+            start,
         )
     )
 
@@ -4009,8 +3304,9 @@ def main():
 
     application.add_handler(
         MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            text_router
+            filters.TEXT
+            & ~filters.COMMAND,
+            text_router,
         )
     )
 
@@ -4024,5 +3320,4 @@ def main():
 
 
 if __name__ == "__main__":
-
     main()
