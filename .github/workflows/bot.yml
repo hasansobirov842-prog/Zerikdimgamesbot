@@ -43,7 +43,7 @@ jobs:
             echo "✅ Eski database topildi"
             ls -lh zerikdim.db
           else
-            echo "⚠️ Database topilmadi, yangisi yaratiladi"
+            echo "⚠️ Database topilmadi"
           fi
 
       - name: Zerikdim botni ishga tushirish
@@ -66,17 +66,22 @@ jobs:
 
           echo "📦 Database saqlanmoqda..."
 
-          git fetch origin main
-
           git add -f zerikdim.db
 
           if git diff --cached --quiet; then
-            echo "ℹ️ Database o'zgarmagan."
+            echo "ℹ️ Database o'zgarmagan"
             exit 0
           fi
 
           git commit -m "Save Zerikdim database"
 
-          git push origin HEAD:main
+          git fetch origin main
+          git reset --soft origin/main
 
-          echo "✅ Database va statistika saqlandi!"
+          git add -f zerikdim.db
+
+          git commit -m "Update Zerikdim database" || true
+
+          git push --force-with-lease origin HEAD:main
+
+          echo "✅ Database saqlandi!"
