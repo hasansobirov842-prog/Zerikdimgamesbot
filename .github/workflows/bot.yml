@@ -5,10 +5,15 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - "zerikdim.db"
 
 concurrency:
   group: zerikdim-bot
-  cancel-in-progress: true
+  cancel-in-progress: false
+
+permissions:
+  contents: write
 
 jobs:
   run-bot:
@@ -17,6 +22,8 @@ jobs:
     steps:
       - name: Kodni olish
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Python o‘rnatish
         uses: actions/setup-python@v5
