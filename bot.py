@@ -34,7 +34,7 @@ DB_FILE = "zerikdim.db"
 
 SPONSOR_CHANNEL = "@SALIKH_PUBG"
 SPONSOR_URL = "https://t.me/SALIKH_PUBG"
-SPONSOR_LIMIT = 750
+SPONSOR_LIMIT = 815
 
 BUY_STARS_URL = "https://t.me/premyumstarstekin/933"
 
