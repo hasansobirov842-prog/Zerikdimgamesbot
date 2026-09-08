@@ -32,9 +32,9 @@ DB_FILE = "zerikdim.db"
 # 150 ta odamga yetganda majburiy obuna avtomatik o'chadi
 # ==========================================================
 
-SPONSOR_CHANNEL = "@SALIKH_PUBG"
-SPONSOR_URL = "https://t.me/SALIKH_PUBG"
-SPONSOR_LIMIT = 815
+SPONSOR_CHANNEL = "@premyumstarstekin"
+SPONSOR_URL = "https://t.me/premyumstarstekin"
+SPONSOR_LIMIT = 2000
 
 BUY_STARS_URL = "https://t.me/premyumstarstekin/933"
 
