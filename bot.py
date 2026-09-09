@@ -39,7 +39,6 @@ backup_lock = asyncio.Lock()
 # FAQAT 2 TA HOMIY KANAL
 SPONSORS = [
     "@premyumstarstekin",
-    "@PubgPPSavdoChat1",
 ]
 
 # Stars sotib olish
