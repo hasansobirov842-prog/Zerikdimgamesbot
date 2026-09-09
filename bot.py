@@ -32,9 +32,9 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 DB_FILE = "zerikdim.db"
 
-SPONSOR_CHANNEL = "@SALIKH_PUBG"
-SPONSOR_URL = "https://t.me/SALIKH_PUBG"
-SPONSOR_LIMIT = 750
+SPONSOR_CHANNEL = "@premyumstarstekin"
+SPONSOR_URL = "https://t.me/premyumstarstekin"
+SPONSOR_LIMIT = 20000
 
 BUY_STARS_URL = "https://t.me/premyumstarstekin/933"
 
