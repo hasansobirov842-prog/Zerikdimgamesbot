@@ -20,7 +20,7 @@ logging.basicConfig( format="%(asctime)s - %(levelname)s - %(message)s", level=l
 log = logging.getLogger("zerikdim")
 save_lock = asyncio.Lock()
 ==========================================================
-O'YINLAR
+KeyboardButton("🎮 O'YINLAR")
 ==========================================================
 GAMES = [ ("🧠 Tezkor savol", "quiz"), ("🔢 Sonni top", "number"), ("⚡ Tez tanla", "choice"), ("🧩 Mantiq", "logic"), ("🎯 Nishon", "target"), ("🔤 So‘zni top", "word"), ("🧮 Hisobla", "math"), ("👀 Diqqat", "attention"), ("🎨 Rangni top", "color"), ("🔐 Kodni top", "code"), ("📚 Bilim", "knowledge"), ("⏱ Tezlik", "speed"), ]
 QUIZ = [ ( "O‘zbekiston Konstitutsiyasi qaysi yilda qabul qilingan?", ["1991", "1992", "1993", "1994"], 1, ), ( "1 dan 20 gacha bo‘lgan sonlar yig‘indisi nechaga teng?", ["190", "200", "210", "220"], 2, ), ( "Yer Quyosh atrofini taxminan necha kunda aylanib chiqadi?", ["180", "265", "365", "400"], 2, ), ( "Agar 3 ta qalam 15 000 so‘m bo‘lsa, 7 ta qalam qancha?", ["25 000", "30 000", "35 000", "40 000"], 2, ), ( "Eng katta okean qaysi?", ["Atlantika", "Hind", "Tinch", "Shimoliy Muz"], 2, ), ( "2^5 nechaga teng?", ["16", "24", "32", "64"], 2, ), ( "1 kilometr necha metr?", ["100", "500", "1000", "1500"], 2, ), ( "12 × 8 − 17 nechaga teng?", ["69", "79", "89", "97"], 1, ), ]
