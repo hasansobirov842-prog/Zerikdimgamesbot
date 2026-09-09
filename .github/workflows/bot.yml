@@ -1,1 +1,94 @@
+name: Zerikdim Bot
 
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "zerikdim.db"
+      - "zerikdim.db.backup"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: zerikdim-bot
+  cancel-in-progress: false
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 345
+
+    steps:
+      - name: Kodni olish
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Python o'rnatish
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Kutubxonalarni o'rnatish
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Database tekshirish
+        run: |
+          if [ -f zerikdim.db ]; then
+            echo "✅ Eski database topildi"
+            ls -lh zerikdim.db
+          else
+            echo "⚠️ Database yo'q — yangi database yaratiladi"
+          fi
+
+      - name: Git sozlash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Zerikdim botni ishga tushirish
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          ADMIN_ID: ${{ secrets.ADMIN_ID }}
+        run: |
+          python bot.py
+
+      - name: Database saqlash
+        if: always()
+        run: |
+          if [ ! -f zerikdim.db ]; then
+            echo "⚠️ zerikdim.db topilmadi"
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          echo "📦 Database saqlanmoqda..."
+
+          git add -f zerikdim.db
+
+          if [ -f zerikdim.db.backup ]; then
+            git add -f zerikdim.db.backup
+          fi
+
+          if git diff --cached --quiet; then
+            echo "ℹ️ Database o'zgarmagan"
+            exit 0
+          fi
+
+          git commit -m "Save Zerikdim database"
+
+          echo "🔄 GitHub'dagi oxirgi holat olinmoqda..."
+          git fetch origin main
+
+          echo "📤 Database GitHub'ga yuborilmoqda..."
+          git push origin HEAD:main
+
+          echo "✅ DATABASE MUVAFFAQIYATLI SAQLANDI!"
