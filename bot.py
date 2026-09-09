@@ -4,11 +4,14 @@ import random
 import logging
 import asyncio
 import shutil
+import subprocess
+
 from datetime import datetime, timezone, timedelta
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ChatMemberStatus
 from telegram.error import Forbidden, RetryAfter, TelegramError
+
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -18,19 +21,32 @@ from telegram.ext import (
     filters,
 )
 
+
+# ============================================================
+# CONFIG
+# ============================================================
+
 TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 DB = "zerikdim.db"
 DB_BACKUP = "zerikdim.db.backup"
+
 BACKUP_INTERVAL = 60
+
 backup_lock = asyncio.Lock()
 
-# =========================
-# SOZLAMALAR
-# =========================
+# FAQAT 2 TA HOMIY KANAL
+SPONSORS = [
+    "@premyumstarstekin",
+    "@PubgPPSavdoChat1",
+]
 
-SPONSOR = "@premyumstarstekin"
+# Stars sotib olish
+BUY_STARS = "https://t.me/premyumstarstekin/933"
+
+# Bot short description
+BOT_SHORT_DESCRIPTION = "@bookmeet"
 
 REFERRAL_REWARD = 9.0
 GAME_REWARD = 0.1
@@ -39,155 +55,280 @@ TASK_REWARD = 5.0
 MIN_WITHDRAW = 50.0
 MIN_REFERRALS = 20
 
-BUY_STARS = "https://t.me/premyumstarstekin/933"
-
 USERS_PER_PAGE = 10
+
+
+# ============================================================
+# LOGGING
+# ============================================================
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s"
 )
+
 logger = logging.getLogger(__name__)
 
 
-# =========================
+# ============================================================
 # DATABASE
-# =========================
+# ============================================================
 
 def connect():
-    con = sqlite3.connect(DB, timeout=30)
+    con = sqlite3.connect(
+        DB,
+        timeout=30
+    )
+
     con.row_factory = sqlite3.Row
-    con.execute("PRAGMA busy_timeout=30000")
+
+    con.execute(
+        "PRAGMA busy_timeout=30000"
+    )
+
     return con
 
 
 def now():
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(
+        timezone.utc
+    ).isoformat()
 
 
 def database_is_valid(path):
-    if not os.path.exists(path) or os.path.getsize(path) == 0:
+
+    if not os.path.exists(path):
         return False
+
+    if os.path.getsize(path) == 0:
+        return False
+
     try:
-        con = sqlite3.connect(path, timeout=10)
-        result = con.execute("PRAGMA integrity_check").fetchone()[0]
+
+        con = sqlite3.connect(
+            path,
+            timeout=10
+        )
+
+        result = con.execute(
+            "PRAGMA integrity_check"
+        ).fetchone()[0]
+
         con.close()
+
         return result == "ok"
+
     except Exception:
+
         return False
 
 
 def restore_backup_if_needed():
+
     if database_is_valid(DB):
         return
 
-    if database_is_valid(DB_BACKUP):
-        tmp = DB + ".restore.tmp"
+    if not database_is_valid(DB_BACKUP):
+        return
+
+    tmp = DB + ".restore.tmp"
+
+    try:
+
+        shutil.copy2(
+            DB_BACKUP,
+            tmp
+        )
+
+        os.replace(
+            tmp,
+            DB
+        )
+
+        logger.warning(
+            "Asosiy DB backupdan tiklandi."
+        )
+
+    except Exception as e:
+
+        logger.error(
+            "DB restore xatosi: %s",
+            e
+        )
 
         try:
-            shutil.copy2(DB_BACKUP, tmp)
-            os.replace(tmp, DB)
-            logger.warning("Asosiy DB backupdan tiklandi.")
-        except Exception as e:
-            logger.error("DB restore xatosi: %s", e)
 
-            try:
-                if os.path.exists(tmp):
-                    os.remove(tmp)
-            except Exception:
-                pass
+            if os.path.exists(tmp):
+                os.remove(tmp)
+
+        except Exception:
+            pass
+
+
+def normalize_sponsors_and_tasks(con):
+
+    cur = con.cursor()
+
+    # Eski homiylarni tozalaymiz.
+    cur.execute(
+        "DELETE FROM sponsors"
+    )
+
+    # Faqat 2 ta kerakli homiy.
+    for channel in SPONSORS:
+
+        cur.execute(
+            """
+            INSERT OR IGNORE INTO sponsors(channel)
+            VALUES(?)
+            """,
+            (channel,)
+        )
+
+    # Eski topshiriqlarni tozalaymiz.
+    cur.execute(
+        "DELETE FROM tasks"
+    )
+
+    # Faqat 2 ta topshiriq.
+    for channel in SPONSORS:
+
+        cur.execute(
+            """
+            INSERT INTO tasks(
+                channel,
+                reward
+            )
+            VALUES(?,?)
+            """,
+            (
+                channel,
+                TASK_REWARD
+            )
+        )
 
 
 def init_db():
+
     restore_backup_if_needed()
 
     con = connect()
     cur = con.cursor()
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY,
-        username TEXT,
-        points REAL DEFAULT 0,
-        games INTEGER DEFAULT 0,
-        wins INTEGER DEFAULT 0,
-        referrals INTEGER DEFAULT 0,
-        referred_by INTEGER,
-        last_seen TEXT,
-        blocked INTEGER DEFAULT 0,
-        referral_rewarded INTEGER DEFAULT 0
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY,
+            username TEXT,
+            points REAL DEFAULT 0,
+            games INTEGER DEFAULT 0,
+            wins INTEGER DEFAULT 0,
+            referrals INTEGER DEFAULT 0,
+            referred_by INTEGER,
+            last_seen TEXT,
+            blocked INTEGER DEFAULT 0,
+            referral_rewarded INTEGER DEFAULT 0
+        )
+        """
     )
-    """)
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS sponsors (
-        channel TEXT PRIMARY KEY
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS sponsors (
+            channel TEXT PRIMARY KEY
+        )
+        """
     )
-    """)
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS tasks (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        channel TEXT UNIQUE,
-        reward REAL DEFAULT 5
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS tasks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            channel TEXT UNIQUE,
+            reward REAL DEFAULT 5
+        )
+        """
     )
-    """)
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS task_claims (
-        user_id INTEGER,
-        task_id INTEGER,
-        claimed_at TEXT,
-        PRIMARY KEY(user_id, task_id)
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS task_claims (
+            user_id INTEGER,
+            task_id INTEGER,
+            claimed_at TEXT,
+            PRIMARY KEY(user_id, task_id)
+        )
+        """
     )
-    """)
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS withdrawals (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id INTEGER,
-        username TEXT,
-        amount REAL,
-        status TEXT DEFAULT 'pending',
-        created_at TEXT
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS withdrawals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            username TEXT,
+            amount REAL,
+            status TEXT DEFAULT 'pending',
+            created_at TEXT
+        )
+        """
     )
-    """)
 
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS bot_stats (
-        id INTEGER PRIMARY KEY CHECK(id=1),
-        started_at TEXT,
-        total_users INTEGER DEFAULT 0
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS bot_stats (
+            id INTEGER PRIMARY KEY CHECK(id=1),
+            started_at TEXT,
+            total_users INTEGER DEFAULT 0
+        )
+        """
     )
-    """)
 
     current_users = cur.execute(
         "SELECT COUNT(*) FROM users"
     ).fetchone()[0]
 
     row = cur.execute(
-        "SELECT total_users FROM bot_stats WHERE id=1"
+        """
+        SELECT total_users
+        FROM bot_stats
+        WHERE id=1
+        """
     ).fetchone()
 
     if row is None:
+
         cur.execute(
-            "INSERT INTO bot_stats(id,started_at,total_users) VALUES(1,?,?)",
-            (now(), current_users)
+            """
+            INSERT INTO bot_stats(
+                id,
+                started_at,
+                total_users
+            )
+            VALUES(1,?,?)
+            """,
+            (
+                now(),
+                current_users
+            )
         )
-    elif current_users > int(row[0] or 0):
+
+    elif current_users > int(
+        row[0] or 0
+    ):
+
         cur.execute(
-            "UPDATE bot_stats SET total_users=? WHERE id=1",
+            """
+            UPDATE bot_stats
+            SET total_users=?
+            WHERE id=1
+            """,
             (current_users,)
         )
 
-    cur.execute(
-        "INSERT OR IGNORE INTO sponsors(channel) VALUES(?)",
-        (SPONSOR,)
-    )
-
-    cur.execute(
-        "INSERT OR IGNORE INTO tasks(channel,reward) VALUES(?,?)",
-        (SPONSOR, TASK_REWARD)
+    # Faqat 2 sponsor va 2 task.
+    normalize_sponsors_and_tasks(
+        con
     )
 
     con.commit()
@@ -195,10 +336,15 @@ def init_db():
 
 
 def get_total_users():
+
     con = connect()
 
     row = con.execute(
-        "SELECT total_users FROM bot_stats WHERE id=1"
+        """
+        SELECT total_users
+        FROM bot_stats
+        WHERE id=1
+        """
     ).fetchone()
 
     con.close()
@@ -218,32 +364,34 @@ def get_total_users():
 
 
 async def update_profile_user_count(bot):
-    try:
-        count = get_total_users()
 
-        description = (
-            f"👥 {count:,} ta foydalanuvchi"
-            .replace(",", " ")
-        )
+    try:
 
         await bot.set_my_short_description(
-            short_description=description
+            short_description=BOT_SHORT_DESCRIPTION
         )
 
     except TelegramError as e:
+
         logger.error(
-            "Bot profilidagi user sonini yangilash xatosi: %s",
+            "Bot short description xatosi: %s",
             e
         )
 
     except Exception as e:
+
         logger.error(
-            "Profil count xatosi: %s",
+            "Profil xatosi: %s",
             e
         )
 
 
+# ============================================================
+# DATABASE BACKUP
+# ============================================================
+
 async def save_database():
+
     async with backup_lock:
 
         try:
@@ -266,10 +414,15 @@ async def save_database():
                 )
 
                 try:
-                    source.backup(target)
+
+                    source.backup(
+                        target
+                    )
+
                     target.commit()
 
                 finally:
+
                     target.close()
                     source.close()
 
@@ -302,9 +455,11 @@ async def save_database():
                     )
 
                     if inside.returncode != 0:
+
                         logger.error(
-                            "Git repository topilmadi; DB backup qilinmadi."
+                            "Git repository topilmadi."
                         )
+
                         return False
 
                     subprocess.run(
@@ -340,10 +495,12 @@ async def save_database():
                     )
 
                     if add.returncode != 0:
+
                         logger.error(
                             "git add xatosi: %s",
                             add.stderr.strip()
                         )
+
                         return False
 
                     diff = subprocess.run(
@@ -374,10 +531,12 @@ async def save_database():
                     )
 
                     if commit.returncode != 0:
+
                         logger.error(
                             "git commit xatosi: %s",
                             commit.stderr.strip()
                         )
+
                         return False
 
                     branch = os.getenv(
@@ -414,26 +573,30 @@ async def save_database():
                     )
 
                     if push.returncode != 0:
+
                         logger.error(
-                            "GitHub push XATO: %s",
+                            "GitHub push xatosi: %s",
                             (
                                 push.stderr
                                 or push.stdout
                             ).strip()
                         )
+
                         return False
 
                     logger.info(
-                        "✅ DB GitHubga muvaffaqiyatli saqlandi."
+                        "DB GitHubga saqlandi."
                     )
 
                     return True
 
                 except Exception as e:
+
                     logger.error(
-                        "GitHub DB backup xatosi: %s",
+                        "GitHub backup xatosi: %s",
                         e
                     )
+
                     return False
 
             return await asyncio.to_thread(
@@ -441,17 +604,21 @@ async def save_database():
             )
 
         except Exception as e:
+
             logger.error(
                 "Database backup xatosi: %s",
                 e
             )
+
             return False
 
 
 async def backup_loop():
+
     while True:
 
         try:
+
             await asyncio.sleep(
                 BACKUP_INTERVAL
             )
@@ -459,22 +626,35 @@ async def backup_loop():
             await save_database()
 
         except asyncio.CancelledError:
+
             return
 
         except Exception as e:
+
             logger.error(
                 "Backup loop xatosi: %s",
                 e
             )
 
 
-def add_user(user, referrer=None):
+# ============================================================
+# USERS
+# ============================================================
+
+def add_user(
+    user,
+    referrer=None
+):
 
     con = connect()
     cur = con.cursor()
 
     old = cur.execute(
-        "SELECT id FROM users WHERE id=?",
+        """
+        SELECT id
+        FROM users
+        WHERE id=?
+        """,
         (user.id,)
     ).fetchone()
 
@@ -483,7 +663,9 @@ def add_user(user, referrer=None):
         cur.execute(
             """
             UPDATE users
-            SET username=?, last_seen=?, blocked=0
+            SET username=?,
+                last_seen=?,
+                blocked=0
             WHERE id=?
             """,
             (
@@ -503,7 +685,11 @@ def add_user(user, referrer=None):
     if referrer and referrer != user.id:
 
         exists = cur.execute(
-            "SELECT id FROM users WHERE id=?",
+            """
+            SELECT id
+            FROM users
+            WHERE id=?
+            """,
             (referrer,)
         ).fetchone()
 
@@ -543,7 +729,7 @@ def add_user(user, referrer=None):
     cur.execute(
         """
         UPDATE bot_stats
-        SET total_users = total_users + 1
+        SET total_users=total_users+1
         WHERE id=1
         """
     )
@@ -561,7 +747,9 @@ def touch(user):
     con.execute(
         """
         UPDATE users
-        SET username=?, last_seen=?, blocked=0
+        SET username=?,
+            last_seen=?,
+            blocked=0
         WHERE id=?
         """,
         (
@@ -580,7 +768,11 @@ def get_user(user_id):
     con = connect()
 
     row = con.execute(
-        "SELECT * FROM users WHERE id=?",
+        """
+        SELECT *
+        FROM users
+        WHERE id=?
+        """,
         (user_id,)
     ).fetchone()
 
@@ -589,14 +781,17 @@ def get_user(user_id):
     return row
 
 
-def add_points(user_id, amount):
+def add_points(
+    user_id,
+    amount
+):
 
     con = connect()
 
     con.execute(
         """
         UPDATE users
-        SET points = points + ?
+        SET points=points+?
         WHERE id=?
         """,
         (
@@ -615,7 +810,8 @@ def reward_referral(user_id):
 
     row = con.execute(
         """
-        SELECT referred_by, referral_rewarded
+        SELECT referred_by,
+               referral_rewarded
         FROM users
         WHERE id=?
         """,
@@ -623,6 +819,7 @@ def reward_referral(user_id):
     ).fetchone()
 
     if not row:
+
         con.close()
         return
 
@@ -634,8 +831,8 @@ def reward_referral(user_id):
         con.execute(
             """
             UPDATE users
-            SET points = points + ?,
-                referral_rewarded = 1
+            SET points=points+?,
+                referral_rewarded=1
             WHERE id=?
             """,
             (
@@ -647,12 +844,10 @@ def reward_referral(user_id):
         con.execute(
             """
             UPDATE users
-            SET referrals = referrals + 1
+            SET referrals=referrals+1
             WHERE id=?
             """,
-            (
-                referrer
-            )
+            (referrer,)
         )
 
         con.commit()
@@ -660,38 +855,52 @@ def reward_referral(user_id):
     con.close()
 
 
-# =========================
+# ============================================================
 # SPONSOR
-# =========================
+# ============================================================
 
-async def subscribed(user_id, context):
+async def subscribed(
+    user_id,
+    context
+):
 
     if user_id == ADMIN_ID:
         return True
 
-    try:
+    for channel in SPONSORS:
 
-        member = await context.bot.get_chat_member(
-            SPONSOR,
-            user_id
-        )
+        try:
 
-        return member.status in (
-            ChatMemberStatus.MEMBER,
-            ChatMemberStatus.ADMINISTRATOR,
-            ChatMemberStatus.OWNER
-        )
+            member = await context.bot.get_chat_member(
+                channel,
+                user_id
+            )
 
-    except Exception:
-        return False
+            ok = member.status in (
+                ChatMemberStatus.MEMBER,
+                ChatMemberStatus.ADMINISTRATOR,
+                ChatMemberStatus.OWNER
+            )
+
+            if not ok:
+                return False
+
+        except Exception:
+
+            return False
+
+    return True
 
 
 def subscription_message():
 
     text = (
         "💎 <b>PREMIUM BONUS</b>\n\n"
-        "⭐ Botdan foydalanish uchun kanalga obuna bo‘ling.\n\n"
-        "🔥 Obuna bo‘lgach, "
+        "⭐ Botdan foydalanish uchun "
+        "quyidagi 2 ta kanalga obuna bo‘ling.\n\n"
+        "💎 <b>1-KANAL</b>\n"
+        "💎 <b>2-KANAL</b>\n\n"
+        "🔥 Ikkala kanalga obuna bo‘lgach, "
         "<b>OBUNANI TEKSHIRISH</b> tugmasini bosing.\n\n"
         "✨ <i>Premium imkoniyatlar sizni kutmoqda!</i>"
     )
@@ -700,8 +909,15 @@ def subscription_message():
 
         [
             InlineKeyboardButton(
-                "💎 KANALGA OBUNA",
+                "💎 1-KANALGA OBUNA",
                 url="https://t.me/premyumstarstekin"
+            )
+        ],
+
+        [
+            InlineKeyboardButton(
+                "🎮 2-KANALGA OBUNA",
+                url="https://t.me/PubgPPSavdoChat1"
             )
         ],
 
@@ -714,10 +930,16 @@ def subscription_message():
 
     ]
 
-    return text, InlineKeyboardMarkup(keyboard)
+    return (
+        text,
+        InlineKeyboardMarkup(keyboard)
+    )
 
 
-async def require_sub(update, context):
+async def require_sub(
+    update,
+    context
+):
 
     user = update.effective_user
 
@@ -734,11 +956,16 @@ async def require_sub(update, context):
 
     if update.callback_query:
 
-        await update.callback_query.message.edit_text(
-            text,
-            reply_markup=markup,
-            parse_mode="HTML"
-        )
+        try:
+
+            await update.callback_query.message.edit_text(
+                text,
+                reply_markup=markup,
+                parse_mode="HTML"
+            )
+
+        except TelegramError:
+            pass
 
     elif update.message:
 
@@ -751,9 +978,9 @@ async def require_sub(update, context):
     return False
 
 
-# =========================
+# ============================================================
 # HOME
-# =========================
+# ============================================================
 
 def home_markup(user_id):
 
@@ -805,7 +1032,7 @@ def home_markup(user_id):
             InlineKeyboardButton(
                 "💸 YECHIB OLISH",
                 callback_data="withdraw"
-            ]
+            )
         ],
 
         [
@@ -826,25 +1053,27 @@ def home_markup(user_id):
 
     if user_id == ADMIN_ID:
 
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    "⚙️ ADMIN PANEL",
-                    callback_data="admin"
-                )
-            ]
-        )
+        rows.append([
+            InlineKeyboardButton(
+                "⚙️ ADMIN PANEL",
+                callback_data="admin"
+            )
+        ])
 
     return InlineKeyboardMarkup(rows)
 
 
-async def home(update, context):
+async def home(
+    update,
+    context
+):
 
     user = update.effective_user
 
     text = (
         "💎 <b>ZERIKDIM GAMES</b>\n\n"
-        "⭐ Stars ishlang va balansingizni boshqaring.\n\n"
+        "⭐ Stars ishlang va balansingizni "
+        "boshqaring.\n\n"
         "👇 Kerakli bo‘limni tanlang:"
     )
 
@@ -852,7 +1081,9 @@ async def home(update, context):
 
         await update.callback_query.message.edit_text(
             text,
-            reply_markup=home_markup(user.id),
+            reply_markup=home_markup(
+                user.id
+            ),
             parse_mode="HTML"
         )
 
@@ -860,23 +1091,32 @@ async def home(update, context):
 
         await update.message.reply_text(
             text,
-            reply_markup=home_markup(user.id),
+            reply_markup=home_markup(
+                user.id
+            ),
             parse_mode="HTML"
         )
 
 
-# =========================
+# ============================================================
 # BALANCE
-# =========================
+# ============================================================
 
-async def balance(update, context):
+async def balance(
+    update,
+    context
+):
 
     user = update.effective_user
 
-    row = get_user(user.id)
+    row = get_user(
+        user.id
+    )
 
     points = float(
-        row["points"] if row else 0
+        row["points"]
+        if row
+        else 0
     )
 
     text = (
@@ -905,14 +1145,20 @@ async def balance(update, context):
     )
 
 
-# =========================
+# ============================================================
 # PROFILE
-# =========================
+# ============================================================
 
-async def profile(update, context):
+async def profile(
+    update,
+    context
+):
 
     user = update.effective_user
-    row = get_user(user.id)
+
+    row = get_user(
+        user.id
+    )
 
     if not row:
         return
@@ -942,15 +1188,20 @@ async def profile(update, context):
     )
 
 
-# =========================
+# ============================================================
 # REFERRAL
-# =========================
+# ============================================================
 
-async def referral(update, context):
+async def referral(
+    update,
+    context
+):
 
     user = update.effective_user
 
-    row = get_user(user.id)
+    row = get_user(
+        user.id
+    )
 
     referrals = (
         row["referrals"]
@@ -995,17 +1246,22 @@ async def referral(update, context):
     )
 
 
-# =========================
+# ============================================================
 # TOP
-# =========================
+# ============================================================
 
-async def top(update, context):
+async def top(
+    update,
+    context
+):
 
     con = connect()
 
     rows = con.execute(
         """
-        SELECT username, points, wins
+        SELECT username,
+               points,
+               wins
         FROM users
         ORDER BY points DESC
         LIMIT 10
@@ -1014,9 +1270,12 @@ async def top(update, context):
 
     con.close()
 
-    text = "🏆 <b>TOP REYTING</b>\n\n"
+    text = (
+        "🏆 <b>TOP REYTING</b>\n\n"
+    )
 
     if not rows:
+
         text += "Hozircha ma’lumot yo‘q."
 
     else:
@@ -1051,9 +1310,9 @@ async def top(update, context):
     )
 
 
-# =========================
+# ============================================================
 # STARS WORK
-# =========================
+# ============================================================
 
 def stars_work_markup():
 
@@ -1104,7 +1363,10 @@ def stars_work_markup():
     return InlineKeyboardMarkup(rows)
 
 
-async def stars_work(update, context):
+async def stars_work(
+    update,
+    context
+):
 
     text = (
         "🎯 <b>STARS ISHLASH</b>\n\n"
@@ -1156,9 +1418,9 @@ async def stars_work_game(
         "stars_work_last"
     ] = datetime.now(timezone.utc)
 
-    await update.callback_query.answer()
-
-    row = get_user(user.id)
+    row = get_user(
+        user.id
+    )
 
     if not row:
         return
@@ -1168,7 +1430,7 @@ async def stars_work_game(
     con.execute(
         """
         UPDATE users
-        SET games = games + 1
+        SET games=games+1
         WHERE id=?
         """,
         (user.id,)
@@ -1187,6 +1449,7 @@ async def stars_work_game(
         value = msg.dice.value
 
         if value >= 4:
+
             add_points(
                 user.id,
                 GAME_REWARD
@@ -1197,7 +1460,7 @@ async def stars_work_game(
             con.execute(
                 """
                 UPDATE users
-                SET wins = wins + 1
+                SET wins=wins+1
                 WHERE id=?
                 """,
                 (user.id,)
@@ -1260,7 +1523,7 @@ async def stars_work_game(
             con.execute(
                 """
                 UPDATE users
-                SET wins = wins + 1
+                SET wins=wins+1
                 WHERE id=?
                 """,
                 (user.id,)
@@ -1271,7 +1534,7 @@ async def stars_work_game(
 
             result = (
                 f"🎲 Natija: {value}\n\n"
-                f"🏆 <b>G‘ALABA!</b>\n"
+                "🏆 <b>G‘ALABA!</b>\n"
                 f"⭐ +{GAME_REWARD:g}"
             )
 
@@ -1305,26 +1568,31 @@ async def stars_work_game(
         return
 
     choices = {
+
         "casino_target": [
             "🎯",
             "❌",
             "❌"
         ],
+
         "casino_card": [
             "🃏",
             "❌",
             "❌"
         ],
+
         "casino_slot": [
             "🎰",
             "❌",
             "❌"
         ],
+
         "casino_wheel": [
             "⭐",
             "❌",
             "❌"
         ]
+
     }
 
     options = choices.get(
@@ -1348,7 +1616,7 @@ async def stars_work_game(
         con.execute(
             """
             UPDATE users
-            SET wins = wins + 1
+            SET wins=wins+1
             WHERE id=?
             """,
             (user.id,)
@@ -1359,7 +1627,7 @@ async def stars_work_game(
 
         result = (
             f"🎮 Natija: {selected}\n\n"
-            f"🏆 <b>G‘ALABA!</b>\n"
+            "🏆 <b>G‘ALABA!</b>\n"
             f"⭐ +{GAME_REWARD:g}"
         )
 
@@ -1391,11 +1659,12 @@ async def stars_work_game(
     )
 
 
-# =========================
+# ============================================================
 # GAMES
-# =========================
+# ============================================================
 
 GAMES = [
+
     ("🧠 Tezkor savol", "quiz"),
     ("🔢 Sonni top", "number"),
     ("⚡ Tez tanla", "choice"),
@@ -1408,6 +1677,7 @@ GAMES = [
     ("🔐 Kodni top", "code"),
     ("📚 Bilim", "knowledge"),
     ("⏱ Tezlik", "speed"),
+
 ]
 
 
@@ -1434,7 +1704,10 @@ def games_markup():
     return InlineKeyboardMarkup(rows)
 
 
-async def games(update, context):
+async def games(
+    update,
+    context
+):
 
     await update.callback_query.message.edit_text(
         "🎮 <b>O‘YINLAR</b>\n\n"
@@ -1450,31 +1723,57 @@ def question_data(code):
     if code == "quiz":
 
         items = [
+
             (
                 "O‘zbekiston poytaxti qaysi?",
-                ["Toshkent", "Samarqand", "Buxoro"],
+                [
+                    "Toshkent",
+                    "Samarqand",
+                    "Buxoro"
+                ],
                 0
             ),
+
             (
                 "1 haftada necha kun bor?",
-                ["5", "7", "9"],
+                [
+                    "5",
+                    "7",
+                    "9"
+                ],
                 1
             ),
+
             (
                 "2 + 2 nechchi?",
-                ["3", "4", "5"],
+                [
+                    "3",
+                    "4",
+                    "5"
+                ],
                 1
             ),
+
             (
                 "Yerning tabiiy yo‘ldoshi nima?",
-                ["Oy", "Quyosh", "Mars"],
+                [
+                    "Oy",
+                    "Quyosh",
+                    "Mars"
+                ],
                 0
             ),
+
             (
                 "Bir yilda necha oy bor?",
-                ["10", "11", "12"],
+                [
+                    "10",
+                    "11",
+                    "12"
+                ],
                 2
-            ),
+            )
+
         ]
 
         return random.choice(items)
@@ -1482,21 +1781,37 @@ def question_data(code):
     if code == "logic":
 
         items = [
+
             (
                 "2, 4, 6, 8, ?",
-                ["9", "10", "12"],
+                [
+                    "9",
+                    "10",
+                    "12"
+                ],
                 1
             ),
+
             (
                 "5, 10, 15, ?",
-                ["18", "20", "25"],
+                [
+                    "18",
+                    "20",
+                    "25"
+                ],
                 1
             ),
+
             (
                 "1, 4, 9, 16, ?",
-                ["20", "24", "25"],
+                [
+                    "20",
+                    "24",
+                    "25"
+                ],
                 2
-            ),
+            )
+
         ]
 
         return random.choice(items)
@@ -1504,21 +1819,37 @@ def question_data(code):
     if code == "knowledge":
 
         items = [
+
             (
                 "Quyosh nima?",
-                ["Yulduz", "Sayyora", "Oy"],
+                [
+                    "Yulduz",
+                    "Sayyora",
+                    "Oy"
+                ],
                 0
             ),
+
             (
                 "Suvning formulasi?",
-                ["CO2", "H2O", "O2"],
+                [
+                    "CO2",
+                    "H2O",
+                    "O2"
+                ],
                 1
             ),
+
             (
                 "Eng katta okean?",
-                ["Atlantika", "Hind", "Tinch"],
+                [
+                    "Atlantika",
+                    "Hind",
+                    "Tinch"
+                ],
                 2
-            ),
+            )
+
         ]
 
         return random.choice(items)
@@ -1526,7 +1857,11 @@ def question_data(code):
     return None
 
 
-async def start_game(update, context, code):
+async def start_game(
+    update,
+    context,
+    code
+):
 
     user = update.effective_user
 
@@ -1564,7 +1899,9 @@ async def start_game(update, context, code):
         "knowledge"
     ):
 
-        data = question_data(code)
+        data = question_data(
+            code
+        )
 
         if not data:
             return
@@ -1764,11 +2101,9 @@ async def start_game(update, context, code):
             15
         )
 
-        answer = a + b
-
         context.user_data[
             "math_answer"
-        ] = answer
+        ] = a + b
 
         await update.callback_query.message.edit_text(
             "🧮 <b>HISOBLA</b>\n\n"
@@ -1789,7 +2124,9 @@ async def start_game(update, context, code):
             values
         )
 
-        random.shuffle(values)
+        random.shuffle(
+            values
+        )
 
         context.user_data[
             "attention_answer"
@@ -1797,7 +2134,8 @@ async def start_game(update, context, code):
 
         text = (
             "👀 <b>DIQQAT</b>\n\n"
-            "Quyidagi raqamlardan maxsus raqamni toping:\n\n"
+            "Quyidagi raqamlardan maxsus "
+            "raqamni toping:\n\n"
             + " ".join(
                 map(str, values)
             )
@@ -1841,8 +2179,10 @@ async def start_game(update, context, code):
                 InlineKeyboardButton(
                     color,
                     callback_data=(
-                        "color_" +
-                        str(colors.index(color))
+                        "color_"
+                        + str(
+                            colors.index(color)
+                        )
                     )
                 )
             ])
@@ -1905,9 +2245,9 @@ async def start_game(update, context, code):
         return
 
 
-# =========================
+# ============================================================
 # GAME ANSWERS
-# =========================
+# ============================================================
 
 async def process_game_answer(
     update,
@@ -1915,6 +2255,7 @@ async def process_game_answer(
 ):
 
     user = update.effective_user
+
     text = update.message.text.strip()
 
     answer = None
@@ -1929,15 +2270,20 @@ async def process_game_answer(
         "logic",
         "knowledge"
     ):
-
         return False
 
     if "number_answer" in context.user_data:
 
         try:
+
             answer = int(text)
 
         except ValueError:
+
+            await update.message.reply_text(
+                "❌ Raqam yuboring."
+            )
+
             return True
 
         correct = context.user_data.pop(
@@ -1955,12 +2301,15 @@ async def process_game_answer(
     elif "math_answer" in context.user_data:
 
         try:
+
             answer = int(text)
 
         except ValueError:
+
             await update.message.reply_text(
                 "❌ Raqam yuboring."
             )
+
             return True
 
         correct = context.user_data.pop(
@@ -1978,12 +2327,15 @@ async def process_game_answer(
     elif "speed_answer" in context.user_data:
 
         try:
+
             answer = int(text)
 
         except ValueError:
+
             await update.message.reply_text(
                 "❌ Raqam yuboring."
             )
+
             return True
 
         correct = context.user_data.pop(
@@ -1991,6 +2343,7 @@ async def process_game_answer(
         )
 
     else:
+
         return False
 
     con = connect()
@@ -1998,7 +2351,7 @@ async def process_game_answer(
     con.execute(
         """
         UPDATE users
-        SET games = games + 1
+        SET games=games+1
         WHERE id=?
         """,
         (user.id,)
@@ -2019,7 +2372,7 @@ async def process_game_answer(
         con.execute(
             """
             UPDATE users
-            SET wins = wins + 1
+            SET wins=wins+1
             WHERE id=?
             """,
             (user.id,)
@@ -2062,9 +2415,9 @@ async def process_game_answer(
     return True
 
 
-# =========================
+# ============================================================
 # TASKS
-# =========================
+# ============================================================
 
 def get_tasks():
 
@@ -2072,7 +2425,9 @@ def get_tasks():
 
     rows = con.execute(
         """
-        SELECT id, channel, reward
+        SELECT id,
+               channel,
+               reward
         FROM tasks
         ORDER BY id
         """
@@ -2083,9 +2438,10 @@ def get_tasks():
     return rows
 
 
-async def tasks(update, context):
-
-    user = update.effective_user
+async def tasks(
+    update,
+    context
+):
 
     rows = get_tasks()
 
@@ -2105,15 +2461,20 @@ async def tasks(update, context):
 
         keyboard.append([
             InlineKeyboardButton(
-                f"⭐ {i}- TOPSHIRIQ",
-                url=f"https://t.me/{channel.lstrip('@')}"
+                f"💎 {i}- KANALGA OBUNA",
+                url=(
+                    "https://t.me/"
+                    + channel.lstrip("@")
+                )
             )
         ])
 
         keyboard.append([
             InlineKeyboardButton(
                 f"✅ {i}- TEKSHIRISH",
-                callback_data=f"claimtask:{row['id']}"
+                callback_data=(
+                    f"claimtask:{row['id']}"
+                )
             )
         ])
 
@@ -2145,7 +2506,9 @@ async def claim_task(
 
     task = con.execute(
         """
-        SELECT id, channel, reward
+        SELECT id,
+               channel,
+               reward
         FROM tasks
         WHERE id=?
         """,
@@ -2167,7 +2530,8 @@ async def claim_task(
         """
         SELECT 1
         FROM task_claims
-        WHERE user_id=? AND task_id=?
+        WHERE user_id=?
+          AND task_id=?
         """,
         (
             user.id,
@@ -2235,7 +2599,7 @@ async def claim_task(
     con.execute(
         """
         UPDATE users
-        SET points = points + ?
+        SET points=points+?
         WHERE id=?
         """,
         (
@@ -2252,32 +2616,45 @@ async def claim_task(
         show_alert=True
     )
 
-    await tasks(update, context)
+    await tasks(
+        update,
+        context
+    )
 
 
-# =========================
+# ============================================================
 # WITHDRAW
-# =========================
+# ============================================================
 
-async def withdraw(update, context):
+async def withdraw(
+    update,
+    context
+):
 
     user = update.effective_user
 
-    row = get_user(user.id)
+    row = get_user(
+        user.id
+    )
 
     points = float(
-        row["points"] if row else 0
+        row["points"]
+        if row
+        else 0
     )
 
     referrals = int(
-        row["referrals"] if row else 0
+        row["referrals"]
+        if row
+        else 0
     )
 
     if points < MIN_WITHDRAW:
 
         await update.callback_query.message.edit_text(
             "💸 <b>YECHIB OLISH</b>\n\n"
-            f"⭐ Minimal balans: <b>{MIN_WITHDRAW:g}</b>\n"
+            f"⭐ Minimal balans: "
+            f"<b>{MIN_WITHDRAW:g}</b>\n"
             f"💰 Sizda: <b>{points:g}</b> ⭐\n\n"
             "Avval Stars yig‘ing.",
             reply_markup=InlineKeyboardMarkup([
@@ -2297,7 +2674,8 @@ async def withdraw(update, context):
 
         await update.callback_query.message.edit_text(
             "💸 <b>YECHIB OLISH</b>\n\n"
-            f"👥 Minimal referral: <b>{MIN_REFERRALS}</b>\n"
+            f"👥 Minimal referral: "
+            f"<b>{MIN_REFERRALS}</b>\n"
             f"👤 Sizda: <b>{referrals}</b>\n\n"
             "Referral sonini to‘ldiring.",
             reply_markup=InlineKeyboardMarkup([
@@ -2346,6 +2724,7 @@ async def process_withdraw(
     user = update.effective_user
 
     try:
+
         amount = float(
             update.message.text.strip()
         )
@@ -2358,7 +2737,9 @@ async def process_withdraw(
 
         return True
 
-    row = get_user(user.id)
+    row = get_user(
+        user.id
+    )
 
     if not row:
         return True
@@ -2401,7 +2782,7 @@ async def process_withdraw(
     con.execute(
         """
         UPDATE users
-        SET points = points - ?
+        SET points=points-?
         WHERE id=?
         """,
         (
@@ -2466,9 +2847,9 @@ async def process_withdraw(
     return True
 
 
-# =========================
+# ============================================================
 # ADMIN
-# =========================
+# ============================================================
 
 def admin_markup():
 
@@ -2504,29 +2885,8 @@ def admin_markup():
 
         [
             InlineKeyboardButton(
-                "➕ SHART QO‘SHISH",
-                callback_data="addtask"
-            )
-        ],
-
-        [
-            InlineKeyboardButton(
-                "➖ SHART O‘CHIRISH",
-                callback_data="deltask"
-            )
-        ],
-
-        [
-            InlineKeyboardButton(
-                "➕ HOMIY KANAL",
-                callback_data="addsponsor"
-            )
-        ],
-
-        [
-            InlineKeyboardButton(
-                "➖ HOMIY KANAL",
-                callback_data="delsponsor"
+                "📢 HOMIY KANALLAR",
+                callback_data="sponsorinfo"
             )
         ],
 
@@ -2540,7 +2900,10 @@ def admin_markup():
     ])
 
 
-async def admin(update, context):
+async def admin(
+    update,
+    context
+):
 
     user = update.effective_user
 
@@ -2555,13 +2918,16 @@ async def admin(update, context):
 
     await update.callback_query.message.edit_text(
         "⚙️ <b>ADMIN PANEL</b>\n\n"
-        "Faqat admin uchun.",
+        "👑 Faqat admin uchun.",
         reply_markup=admin_markup(),
         parse_mode="HTML"
     )
 
 
-async def admin_stats(update, context):
+async def admin_stats(
+    update,
+    context
+):
 
     user = update.effective_user
 
@@ -2657,7 +3023,9 @@ async def users_page(
 
     rows = con.execute(
         """
-        SELECT id, username, points
+        SELECT id,
+               username,
+               points
         FROM users
         ORDER BY id DESC
         LIMIT ? OFFSET ?
@@ -2675,11 +3043,12 @@ async def users_page(
     con.close()
 
     text = (
-        f"👥 <b>FOYDALANUVCHILAR</b>\n\n"
+        "👥 <b>FOYDALANUVCHILAR</b>\n\n"
         f"Jami: <b>{total}</b>\n\n"
     )
 
     if not rows:
+
         text += "Foydalanuvchilar yo‘q."
 
     else:
@@ -2718,11 +3087,10 @@ async def users_page(
             )
         )
 
-    if buttons:
-        keyboard = [buttons]
+    keyboard = []
 
-    else:
-        keyboard = []
+    if buttons:
+        keyboard.append(buttons)
 
     keyboard.append([
         InlineKeyboardButton(
@@ -2739,6 +3107,10 @@ async def users_page(
         parse_mode="HTML"
     )
 
+
+# ============================================================
+# BROADCAST
+# ============================================================
 
 async def broadcast_start(
     update,
@@ -2826,6 +3198,7 @@ async def do_broadcast(
                 success += 1
 
             except Exception:
+
                 failed += 1
 
         except Forbidden:
@@ -2847,6 +3220,7 @@ async def do_broadcast(
             con.close()
 
         except Exception:
+
             failed += 1
 
         await asyncio.sleep(
@@ -2867,6 +3241,10 @@ async def do_broadcast(
 
     return True
 
+
+# ============================================================
+# TASK ADMIN
+# ============================================================
 
 async def task_admin(
     update,
@@ -2891,6 +3269,7 @@ async def task_admin(
     )
 
     if not rows:
+
         text += "Topshiriqlar yo‘q."
 
     else:
@@ -2917,6 +3296,48 @@ async def task_admin(
     )
 
 
+async def sponsor_info(
+    update,
+    context
+):
+
+    user = update.effective_user
+
+    if user.id != ADMIN_ID:
+
+        await update.callback_query.answer(
+            "❌ Ruxsat yo‘q!",
+            show_alert=True
+        )
+
+        return
+
+    text = (
+        "📢 <b>HOMIY KANALLAR</b>\n\n"
+        "💎 1. @premyumstarstekin\n"
+        "🎮 2. @PubgPPSavdoChat1\n\n"
+        "🔒 Faqat shu 2 ta kanal ishlatiladi.\n"
+        "⚠️ Bot ikkala kanalga obunani tekshiradi."
+    )
+
+    await update.callback_query.message.edit_text(
+        text,
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(
+                    "🔙 ADMIN",
+                    callback_data="admin"
+                )
+            ]
+        ]),
+        parse_mode="HTML"
+    )
+
+
+# ============================================================
+# ADMIN TEXT
+# ============================================================
+
 async def admin_text(
     update,
     context
@@ -2933,151 +3354,12 @@ async def admin_text(
     ):
         return True
 
-    mode = context.user_data.get(
-        "admin_mode"
-    )
-
-    if mode == "addtask":
-
-        channel = update.message.text.strip()
-
-        if not channel.startswith("@"):
-
-            await update.message.reply_text(
-                "❌ Kanal @username ko‘rinishida bo‘lsin."
-            )
-
-            return True
-
-        con = connect()
-
-        try:
-
-            con.execute(
-                """
-                INSERT INTO tasks(
-                    channel,
-                    reward
-                )
-                VALUES(?,?)
-                """,
-                (
-                    channel,
-                    TASK_REWARD
-                )
-            )
-
-            con.commit()
-
-            await update.message.reply_text(
-                f"✅ Topshiriq qo‘shildi: {channel}"
-            )
-
-        except sqlite3.IntegrityError:
-
-            await update.message.reply_text(
-                "⚠️ Bu topshiriq allaqachon mavjud."
-            )
-
-        finally:
-            con.close()
-
-        context.user_data.pop(
-            "admin_mode",
-            None
-        )
-
-        return True
-
-    if mode == "deltask":
-
-        channel = update.message.text.strip()
-
-        con = connect()
-
-        con.execute(
-            "DELETE FROM tasks WHERE channel=?",
-            (channel,)
-        )
-
-        con.commit()
-        con.close()
-
-        context.user_data.pop(
-            "admin_mode",
-            None
-        )
-
-        await update.message.reply_text(
-            f"✅ Topshiriq o‘chirildi: {channel}"
-        )
-
-        return True
-
-    if mode == "addsponsor":
-
-        channel = update.message.text.strip()
-
-        if not channel.startswith("@"):
-
-            await update.message.reply_text(
-                "❌ @username yuboring."
-            )
-
-            return True
-
-        con = connect()
-
-        con.execute(
-            "INSERT OR IGNORE INTO sponsors(channel) VALUES(?)",
-            (channel,)
-        )
-
-        con.commit()
-        con.close()
-
-        context.user_data.pop(
-            "admin_mode",
-            None
-        )
-
-        await update.message.reply_text(
-            f"✅ Homiy kanal qo‘shildi: {channel}"
-        )
-
-        return True
-
-    if mode == "delsponsor":
-
-        channel = update.message.text.strip()
-
-        con = connect()
-
-        con.execute(
-            "DELETE FROM sponsors WHERE channel=?",
-            (channel,)
-        )
-
-        con.commit()
-        con.close()
-
-        context.user_data.pop(
-            "admin_mode",
-            None
-        )
-
-        await update.message.reply_text(
-            f"✅ Homiy kanal o‘chirildi: {channel}"
-        )
-
-        return True
-
     return False
 
 
-# =========================
+# ============================================================
 # CALLBACK
-# =========================
+# ============================================================
 
 async def callback(
     update,
@@ -3090,20 +3372,32 @@ async def callback(
 
     data = q.data
 
-    if data == "check_sub":
+    # --------------------------------------------------------
+    # CHECK SUB
+    # --------------------------------------------------------
 
-        await q.answer()
+    if data == "check_sub":
 
         if await subscribed(
             user.id,
             context
         ):
 
-            await q.message.edit_text(
-                "✅ <b>Obuna tasdiqlandi!</b>\n\n"
-                "🎉 Botdan foydalanishingiz mumkin.",
-                parse_mode="HTML"
+            await q.answer(
+                "✅ Obuna tasdiqlandi!",
+                show_alert=True
             )
+
+            try:
+
+                await q.message.edit_text(
+                    "✅ <b>Obuna tasdiqlandi!</b>\n\n"
+                    "🎉 Botdan foydalanishingiz mumkin.",
+                    parse_mode="HTML"
+                )
+
+            except TelegramError:
+                pass
 
             await asyncio.sleep(
                 0.5
@@ -3117,17 +3411,25 @@ async def callback(
         else:
 
             await q.answer(
-                "❌ Kanalga obuna bo‘lmagansiz.",
+                "❌ Ikkala kanalga ham obuna bo‘ling.",
                 show_alert=True
             )
 
         return
+
+    # --------------------------------------------------------
+    # SUBSCRIPTION
+    # --------------------------------------------------------
 
     if not await require_sub(
         update,
         context
     ):
         return
+
+    # --------------------------------------------------------
+    # HOME
+    # --------------------------------------------------------
 
     if data == "home":
 
@@ -3140,6 +3442,10 @@ async def callback(
 
         return
 
+    # --------------------------------------------------------
+    # BALANCE
+    # --------------------------------------------------------
+
     if data == "balance":
 
         await q.answer()
@@ -3150,6 +3456,10 @@ async def callback(
         )
 
         return
+
+    # --------------------------------------------------------
+    # PROFILE
+    # --------------------------------------------------------
 
     if data == "profile":
 
@@ -3162,6 +3472,10 @@ async def callback(
 
         return
 
+    # --------------------------------------------------------
+    # REF
+    # --------------------------------------------------------
+
     if data == "ref":
 
         await q.answer()
@@ -3172,6 +3486,10 @@ async def callback(
         )
 
         return
+
+    # --------------------------------------------------------
+    # TOP
+    # --------------------------------------------------------
 
     if data == "top":
 
@@ -3184,6 +3502,10 @@ async def callback(
 
         return
 
+    # --------------------------------------------------------
+    # WITHDRAW
+    # --------------------------------------------------------
+
     if data == "withdraw":
 
         await q.answer()
@@ -3195,13 +3517,18 @@ async def callback(
 
         return
 
+    # --------------------------------------------------------
+    # BUY
+    # --------------------------------------------------------
+
     if data == "buy":
 
         await q.answer()
 
         await q.message.edit_text(
             "⭐ <b>STARS OLISH</b>\n\n"
-            "👇 Stars olish uchun kerakli paketni tanlang:\n\n"
+            "👇 Stars olish uchun kerakli "
+            "paketni tanlang:\n\n"
             "⭐ 50\n"
             "⭐ 100\n"
             "⭐ 200\n"
@@ -3209,7 +3536,8 @@ async def callback(
             "⭐ 1000\n"
             "⭐ 2000\n"
             "⭐ 5000\n\n"
-            "✏️ Boshqa miqdor uchun admin bilan bog‘laning.",
+            "✏️ Boshqa miqdor uchun admin "
+            "bilan bog‘laning.",
             reply_markup=InlineKeyboardMarkup([
 
                 [
@@ -3272,6 +3600,10 @@ async def callback(
 
         return
 
+    # --------------------------------------------------------
+    # BUY AMOUNT
+    # --------------------------------------------------------
+
     if data.startswith("buy:"):
 
         await q.answer()
@@ -3283,9 +3615,8 @@ async def callback(
 
         await q.message.edit_text(
             f"⭐ <b>{amount} STARS</b>\n\n"
-            "Telegram Stars orqali xarid qilish uchun "
-            "quyidagi tugmani bosing.\n\n"
-            "⚠️ Bu bo‘lim real Starsni kazino tikishiga aylantirmaydi.",
+            "Telegram Stars orqali xarid qilish "
+            "uchun quyidagi tugmani bosing.",
             reply_markup=InlineKeyboardMarkup([
                 [
                     InlineKeyboardButton(
@@ -3305,6 +3636,10 @@ async def callback(
 
         return
 
+    # --------------------------------------------------------
+    # CUSTOM BUY
+    # --------------------------------------------------------
+
     if data == "buy_custom":
 
         await q.answer(
@@ -3313,6 +3648,10 @@ async def callback(
         )
 
         return
+
+    # --------------------------------------------------------
+    # STARS WORK
+    # --------------------------------------------------------
 
     if data == "stars_work":
 
@@ -3324,6 +3663,10 @@ async def callback(
         )
 
         return
+
+    # --------------------------------------------------------
+    # STARS WORK GAMES
+    # --------------------------------------------------------
 
     if data in (
         "casino_dice",
@@ -3344,6 +3687,10 @@ async def callback(
 
         return
 
+    # --------------------------------------------------------
+    # GAMES
+    # --------------------------------------------------------
+
     if data == "games":
 
         await q.answer()
@@ -3354,6 +3701,10 @@ async def callback(
         )
 
         return
+
+    # --------------------------------------------------------
+    # START GAME
+    # --------------------------------------------------------
 
     if data.startswith("game_"):
 
@@ -3373,16 +3724,22 @@ async def callback(
 
         return
 
+    # --------------------------------------------------------
+    # QUIZ ANSWER
+    # --------------------------------------------------------
+
     if data.startswith("answer_"):
 
         await q.answer()
 
         try:
+
             selected = int(
                 data.split("_")[1]
             )
 
         except Exception:
+
             return
 
         correct = context.user_data.pop(
@@ -3403,7 +3760,7 @@ async def callback(
         con.execute(
             """
             UPDATE users
-            SET games = games + 1
+            SET games=games+1
             WHERE id=?
             """,
             (user.id,)
@@ -3424,7 +3781,7 @@ async def callback(
             con.execute(
                 """
                 UPDATE users
-                SET wins = wins + 1
+                SET wins=wins+1
                 WHERE id=?
                 """,
                 (user.id,)
@@ -3466,6 +3823,10 @@ async def callback(
 
         return
 
+    # --------------------------------------------------------
+    # CHOICE
+    # --------------------------------------------------------
+
     if data.startswith("choice_"):
 
         await q.answer()
@@ -3488,7 +3849,7 @@ async def callback(
         con.execute(
             """
             UPDATE users
-            SET games = games + 1
+            SET games=games+1
             WHERE id=?
             """,
             (user.id,)
@@ -3509,7 +3870,7 @@ async def callback(
             con.execute(
                 """
                 UPDATE users
-                SET wins = wins + 1
+                SET wins=wins+1
                 WHERE id=?
                 """,
                 (user.id,)
@@ -3551,13 +3912,23 @@ async def callback(
 
         return
 
+    # --------------------------------------------------------
+    # TARGET
+    # --------------------------------------------------------
+
     if data.startswith("target_"):
 
         await q.answer()
 
-        selected = int(
-            data.split("_")[1]
-        )
+        try:
+
+            selected = int(
+                data.split("_")[1]
+            )
+
+        except Exception:
+
+            return
 
         correct = context.user_data.pop(
             "target_answer",
@@ -3572,7 +3943,7 @@ async def callback(
         con.execute(
             """
             UPDATE users
-            SET games = games + 1
+            SET games=games+1
             WHERE id=?
             """,
             (user.id,)
@@ -3593,7 +3964,7 @@ async def callback(
             con.execute(
                 """
                 UPDATE users
-                SET wins = wins + 1
+                SET wins=wins+1
                 WHERE id=?
                 """,
                 (user.id,)
@@ -3635,13 +4006,23 @@ async def callback(
 
         return
 
+    # --------------------------------------------------------
+    # COLOR
+    # --------------------------------------------------------
+
     if data.startswith("color_"):
 
         await q.answer()
 
-        selected = int(
-            data.split("_")[1]
-        )
+        try:
+
+            selected = int(
+                data.split("_")[1]
+            )
+
+        except Exception:
+
+            return
 
         correct_text = context.user_data.pop(
             "color_answer",
@@ -3667,7 +4048,7 @@ async def callback(
         con.execute(
             """
             UPDATE users
-            SET games = games + 1
+            SET games=games+1
             WHERE id=?
             """,
             (user.id,)
@@ -3688,7 +4069,7 @@ async def callback(
             con.execute(
                 """
                 UPDATE users
-                SET wins = wins + 1
+                SET wins=wins+1
                 WHERE id=?
                 """,
                 (user.id,)
@@ -3730,11 +4111,16 @@ async def callback(
 
         return
 
+    # --------------------------------------------------------
+    # TASK CLAIM
+    # --------------------------------------------------------
+
     if data.startswith("claimtask:"):
 
         await q.answer()
 
         try:
+
             task_id = int(
                 data.split(":")[1]
             )
@@ -3756,9 +4142,20 @@ async def callback(
 
         return
 
+    # --------------------------------------------------------
     # ADMIN
+    # --------------------------------------------------------
 
     if data == "admin":
+
+        if user.id != ADMIN_ID:
+
+            await q.answer(
+                "❌ Ruxsat yo‘q!",
+                show_alert=True
+            )
+
+            return
 
         await q.answer()
 
@@ -3771,6 +4168,15 @@ async def callback(
 
     if data == "astats":
 
+        if user.id != ADMIN_ID:
+
+            await q.answer(
+                "❌ Ruxsat yo‘q!",
+                show_alert=True
+            )
+
+            return
+
         await q.answer()
 
         await admin_stats(
@@ -3782,11 +4188,26 @@ async def callback(
 
     if data.startswith("users:"):
 
+        if user.id != ADMIN_ID:
+
+            await q.answer(
+                "❌ Ruxsat yo‘q!",
+                show_alert=True
+            )
+
+            return
+
         await q.answer()
 
-        page = int(
-            data.split(":")[1]
-        )
+        try:
+
+            page = int(
+                data.split(":")[1]
+            )
+
+        except Exception:
+
+            page = 0
 
         await users_page(
             update,
@@ -3798,6 +4219,15 @@ async def callback(
 
     if data == "broadcast":
 
+        if user.id != ADMIN_ID:
+
+            await q.answer(
+                "❌ Ruxsat yo‘q!",
+                show_alert=True
+            )
+
+            return
+
         await q.answer()
 
         await broadcast_start(
@@ -3807,59 +4237,16 @@ async def callback(
 
         return
 
-    if data == "addtask":
-
-        if user.id != ADMIN_ID:
-
-            await q.answer(
-                "❌ Ruxsat yo‘q!",
-                show_alert=True
-            )
-
-            return
-
-        await q.answer()
-
-        context.user_data[
-            "admin_mode"
-        ] = "addtask"
-
-        await q.message.edit_text(
-            "➕ <b>SHART QO‘SHISH</b>\n\n"
-            "Kanal username yuboring.\n"
-            "Masalan: <code>@mychannel</code>\n\n"
-            f"🎁 Mukofot avtomatik: +{TASK_REWARD:g} ⭐",
-            parse_mode="HTML"
-        )
-
-        return
-
-    if data == "deltask":
-
-        if user.id != ADMIN_ID:
-
-            await q.answer(
-                "❌ Ruxsat yo‘q!",
-                show_alert=True
-            )
-
-            return
-
-        await q.answer()
-
-        context.user_data[
-            "admin_mode"
-        ] = "deltask"
-
-        await q.message.edit_text(
-            "➖ <b>SHART O‘CHIRISH</b>\n\n"
-            "O‘chirmoqchi bo‘lgan kanalni yuboring.",
-            parse_mode="HTML"
-        )
-
-        return
-
     if data == "taskadmin":
+
+        if user.id != ADMIN_ID:
+
+            await q.answer(
+                "❌ Ruxsat yo‘q!",
+                show_alert=True
+            )
+
+            return
 
         await q.answer()
 
@@ -3870,7 +4257,7 @@ async def callback(
 
         return
 
-    if data == "addsponsor":
+    if data == "sponsorinfo":
 
         if user.id != ADMIN_ID:
 
@@ -3883,40 +4270,9 @@ async def callback(
 
         await q.answer()
 
-        context.user_data[
-            "admin_mode"
-        ] = "addsponsor"
-
-        await q.message.edit_text(
-            "➕ <b>HOMIY KANAL QO‘SHISH</b>\n\n"
-            "Masalan: <code>@kanal</code>\n\n"
-            "⚠️ Bot kanalga admin qilingan bo‘lishi kerak.",
-            parse_mode="HTML"
-        )
-
-        return
-
-    if data == "delsponsor":
-
-        if user.id != ADMIN_ID:
-
-            await q.answer(
-                "❌ Ruxsat yo‘q!",
-                show_alert=True
-            )
-
-            return
-
-        await q.answer()
-
-        context.user_data[
-            "admin_mode"
-        ] = "delsponsor"
-
-        await q.message.edit_text(
-            "➖ <b>HOMIY KANAL O‘CHIRISH</b>\n\n"
-            "Kanal username yuboring.",
-            parse_mode="HTML"
+        await sponsor_info(
+            update,
+            context
         )
 
         return
@@ -3927,11 +4283,14 @@ async def callback(
     )
 
 
-# =========================
+# ============================================================
 # START
-# =========================
+# ============================================================
 
-async def start(update, context):
+async def start(
+    update,
+    context
+):
 
     user = update.effective_user
 
@@ -3944,6 +4303,7 @@ async def start(update, context):
         if arg.startswith("ref_"):
 
             try:
+
                 referrer = int(
                     arg.replace(
                         "ref_",
@@ -3952,6 +4312,7 @@ async def start(update, context):
                 )
 
             except ValueError:
+
                 referrer = None
 
     created = await asyncio.to_thread(
@@ -3995,9 +4356,9 @@ async def start(update, context):
     )
 
 
-# =========================
+# ============================================================
 # USER ID
-# =========================
+# ============================================================
 
 async def my_id(
     update,
@@ -4005,15 +4366,15 @@ async def my_id(
 ):
 
     await update.message.reply_text(
-        f"🆔 Sizning Telegram ID: "
+        "🆔 Sizning Telegram ID: "
         f"<code>{update.effective_user.id}</code>",
         parse_mode="HTML"
     )
 
 
-# =========================
+# ============================================================
 # MESSAGE ROUTER
-# =========================
+# ============================================================
 
 async def message_handler(
     update,
@@ -4027,6 +4388,7 @@ async def message_handler(
 
     touch(user)
 
+    # ADMIN MESSAGE
     if user.id == ADMIN_ID:
 
         handled = await admin_text(
@@ -4037,6 +4399,7 @@ async def message_handler(
         if handled:
             return
 
+    # GAME ANSWER
     handled = await process_game_answer(
         update,
         context
@@ -4045,6 +4408,7 @@ async def message_handler(
     if handled:
         return
 
+    # WITHDRAW
     handled = await process_withdraw(
         update,
         context
@@ -4053,6 +4417,7 @@ async def message_handler(
     if handled:
         return
 
+    # SUBSCRIPTION
     if not await require_sub(
         update,
         context
@@ -4066,6 +4431,10 @@ async def message_handler(
         )
     )
 
+
+# ============================================================
+# CANCEL
+# ============================================================
 
 async def cancel(
     update,
@@ -4081,9 +4450,9 @@ async def cancel(
         )
 
 
-# =========================
-# APP START / SHUTDOWN
-# =========================
+# ============================================================
+# POST INIT
+# ============================================================
 
 async def post_init(app):
 
@@ -4100,6 +4469,10 @@ async def post_init(app):
     await save_database()
 
 
+# ============================================================
+# POST SHUTDOWN
+# ============================================================
+
 async def post_shutdown(app):
 
     task = app.bot_data.get(
@@ -4111,6 +4484,7 @@ async def post_shutdown(app):
         task.cancel()
 
         try:
+
             await task
 
         except asyncio.CancelledError:
@@ -4119,9 +4493,9 @@ async def post_shutdown(app):
     await save_database()
 
 
-# =========================
+# ============================================================
 # MAIN
-# =========================
+# ============================================================
 
 def main():
 
@@ -4129,14 +4503,16 @@ def main():
 
         raise RuntimeError(
             "BOT_TOKEN topilmadi! "
-            "GitHub Secrets/Variables ga BOT_TOKEN qo‘ying."
+            "GitHub Secrets/Variables ga "
+            "BOT_TOKEN qo‘ying."
         )
 
     if not ADMIN_ID:
 
         raise RuntimeError(
             "ADMIN_ID topilmadi! "
-            "GitHub Secrets/Variables ga ADMIN_ID qo‘ying."
+            "GitHub Secrets/Variables ga "
+            "ADMIN_ID qo‘ying."
         )
 
     init_db()
