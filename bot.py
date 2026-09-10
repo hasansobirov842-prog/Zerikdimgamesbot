@@ -48,7 +48,7 @@ MIN_REFERRALS = 20
 GAME_COOLDOWN = 30
 
 # Sponsor limit
-SPONSOR_LIMIT = 750
+SPONSOR_LIMIT = 20000
 
 # Stars sotib olish linki
 BUY_STARS_URL = "https://t.me/premyumstarstekin/933"
