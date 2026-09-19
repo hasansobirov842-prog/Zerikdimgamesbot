@@ -1,7 +1,8 @@
 import os
 import sqlite3
 import logging
-from datetime import datetime, timezone
+import asyncio
+from datetime import datetime, timezone, timedelta
 
 from telegram import (
     Update,
@@ -10,7 +11,7 @@ from telegram import (
     ReplyKeyboardMarkup,
 )
 from telegram.constants import ChatMemberStatus
-from telegram.error import TelegramError
+from telegram.error import TelegramError, Forbidden, RetryAfter
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -34,16 +35,18 @@ except Exception:
 
 DB_FILE = "zerikdim.db"
 
-PAYMENT_CARD = os.getenv("PAYMENT_CARD", "").strip()
-PAYMENT_OWNER = os.getenv("PAYMENT_OWNER", "RAKHMONOVA/O").strip()
-
-REFERRAL_STARS = 9.0
-REFERRAL_MONEY = 500.0
-
-MIN_MONEY_WITHDRAW = 10000
+# KARTA OCHIQ KO'RINADI
+PAYMENT_CARD = "5614681008971867"
+PAYMENT_OWNER = "RAKHMONOVA/O"
 
 SPONSOR_CHANNEL = "@premyumstarstekin"
 SPONSOR_URL = "https://t.me/premyumstarstekin"
+
+REFERRAL_STARS = 9.0
+REFERRAL_BONUS = 500.0
+
+MIN_WITHDRAW = 10000
+MIN_TOPUP = 1000
 
 
 logging.basicConfig(
@@ -55,7 +58,7 @@ logger = logging.getLogger(__name__)
 
 
 # =========================================================
-# MAHSULOTLAR
+# NOMERLAR
 # =========================================================
 
 NUMBERS = {
@@ -69,7 +72,12 @@ NUMBERS = {
     "🇺🇿 Uzbekistan": 12000,
 }
 
-PROMO = {
+
+# =========================================================
+# NAKRUTKA
+# =========================================================
+
+NAKRUTKA = {
     "Telegram": {
         "1K": 5000,
         "10K": 40000,
@@ -92,6 +100,11 @@ PROMO = {
     },
 }
 
+
+# =========================================================
+# STARS
+# =========================================================
+
 STARS_PRICES = {
     50: 10999,
     100: 22500,
@@ -99,6 +112,11 @@ STARS_PRICES = {
     500: 99500,
     1000: 199000,
 }
+
+
+# =========================================================
+# PREMIUM
+# =========================================================
 
 PREMIUM_PRICES = {
     1: 45000,
@@ -139,9 +157,9 @@ def ensure_column(conn, table, column, definition):
 def init_db():
     conn = db()
 
-    # =====================================================
-    # ESKI USERS
-    # =====================================================
+    # -----------------------------------------------------
+    # USERS - ESKI JADVALLAR SAQLANADI
+    # -----------------------------------------------------
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -158,7 +176,6 @@ def init_db():
         )
     """)
 
-    # Eski ustunlar
     ensure_column(
         conn,
         "users",
@@ -180,9 +197,41 @@ def init_db():
         "INTEGER DEFAULT 0"
     )
 
-    # =====================================================
-    # ESKI TABLES
-    # =====================================================
+    # YANGI - HAQIQI KIRITILGAN PUL
+    ensure_column(
+        conn,
+        "users",
+        "real_balance",
+        "REAL DEFAULT 0"
+    )
+
+    # YANGI - BONUS PUL
+    ensure_column(
+        conn,
+        "users",
+        "bonus_balance",
+        "REAL DEFAULT 0"
+    )
+
+    # JAMI KIRITILGAN PUL
+    ensure_column(
+        conn,
+        "users",
+        "total_deposited",
+        "REAL DEFAULT 0"
+    )
+
+    # JAMI SARFLANGAN PUL
+    ensure_column(
+        conn,
+        "users",
+        "total_spent",
+        "REAL DEFAULT 0"
+    )
+
+    # -----------------------------------------------------
+    # ESKI WITHDRAWALS
+    # -----------------------------------------------------
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS withdrawals (
@@ -194,6 +243,10 @@ def init_db():
             processed_at TEXT
         )
     """)
+
+    # -----------------------------------------------------
+    # TASKS
+    # -----------------------------------------------------
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
@@ -214,6 +267,10 @@ def init_db():
         )
     """)
 
+    # -----------------------------------------------------
+    # BOT STATS
+    # -----------------------------------------------------
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS bot_stats (
             id INTEGER PRIMARY KEY,
@@ -221,6 +278,10 @@ def init_db():
             total_users INTEGER DEFAULT 0
         )
     """)
+
+    # -----------------------------------------------------
+    # SPONSOR
+    # -----------------------------------------------------
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS sponsor_settings (
@@ -237,9 +298,9 @@ def init_db():
         )
     """)
 
-    # =====================================================
-    # YANGI TABLES
-    # =====================================================
+    # -----------------------------------------------------
+    # TO'LOVLAR
+    # -----------------------------------------------------
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS payment_requests (
@@ -252,6 +313,10 @@ def init_db():
             processed_at TEXT
         )
     """)
+
+    # -----------------------------------------------------
+    # BUYURTMALAR
+    # -----------------------------------------------------
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS service_orders (
@@ -267,13 +332,16 @@ def init_db():
         )
     """)
 
-    # Promo link uchun alohida ustun
     ensure_column(
         conn,
         "service_orders",
         "link",
         "TEXT DEFAULT ''"
     )
+
+    # -----------------------------------------------------
+    # PUL YECHISH
+    # -----------------------------------------------------
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS money_withdrawals (
@@ -286,30 +354,29 @@ def init_db():
         )
     """)
 
-    # =====================================================
-    # BOT STATS
-    # =====================================================
+    # -----------------------------------------------------
+    # STATS BOSHLASH
+    # -----------------------------------------------------
 
     if conn.execute(
         "SELECT 1 FROM bot_stats WHERE id=1"
     ).fetchone() is None:
+
         conn.execute("""
             INSERT INTO bot_stats
             (id, started_at, total_users)
             VALUES (1, ?, 0)
         """, (now_iso(),))
 
-    # Eski users bo‘lsa, total_users 0 bo‘lib qolgan holatni
-    # avtomatik tiklaymiz.
+    real_users = conn.execute(
+        "SELECT COUNT(*) AS c FROM users"
+    ).fetchone()["c"]
+
     stats = conn.execute("""
         SELECT total_users
         FROM bot_stats
         WHERE id=1
     """).fetchone()
-
-    real_users = conn.execute(
-        "SELECT COUNT(*) AS c FROM users"
-    ).fetchone()["c"]
 
     if stats and int(stats["total_users"] or 0) < real_users:
         conn.execute("""
@@ -318,13 +385,14 @@ def init_db():
             WHERE id=1
         """, (real_users,))
 
-    # =====================================================
+    # -----------------------------------------------------
     # SPONSOR
-    # =====================================================
+    # -----------------------------------------------------
 
     if conn.execute(
         "SELECT 1 FROM sponsor_settings WHERE id=1"
     ).fetchone() is None:
+
         conn.execute("""
             INSERT INTO sponsor_settings
             (id, active, disabled_at)
@@ -341,7 +409,7 @@ def init_db():
         VALUES (?, ?)
     """, (
         SPONSOR_CHANNEL,
-        SPONSOR_URL,
+        SPONSOR_URL
     ))
 
     conn.execute("""
@@ -362,14 +430,15 @@ def init_db():
 def add_user(user_id, username):
     conn = db()
 
-    existing = conn.execute(
+    row = conn.execute(
         "SELECT id FROM users WHERE id=?",
         (user_id,)
     ).fetchone()
 
-    is_new = existing is None
+    is_new = row is None
 
     if is_new:
+
         conn.execute("""
             INSERT INTO users (
                 id,
@@ -384,17 +453,22 @@ def add_user(user_id, username):
                 referral_rewarded,
                 money_balance,
                 premium_1m,
-                premium_3m
+                premium_3m,
+                real_balance,
+                bonus_balance,
+                total_deposited,
+                total_spent
             )
             VALUES (
                 ?, ?, 0, 0, 0, 0,
                 NULL, ?, 0, 0,
-                0, 0, 0
+                0, 0, 0,
+                0, 0, 0, 0
             )
         """, (
             user_id,
             username or "",
-            now_iso(),
+            now_iso()
         ))
 
         conn.execute("""
@@ -404,6 +478,7 @@ def add_user(user_id, username):
         """)
 
     else:
+
         conn.execute("""
             UPDATE users
             SET username=?,
@@ -413,7 +488,7 @@ def add_user(user_id, username):
         """, (
             username or "",
             now_iso(),
-            user_id,
+            user_id
         ))
 
     conn.commit()
@@ -446,17 +521,17 @@ def get_user(user_id):
 # SPONSOR
 # =========================================================
 
-async def is_subscribed(bot, user_id, channel):
+async def is_subscribed(bot, user_id):
     try:
         member = await bot.get_chat_member(
-            chat_id=channel,
-            user_id=user_id,
+            SPONSOR_CHANNEL,
+            user_id
         )
 
         return member.status in (
             ChatMemberStatus.MEMBER,
             ChatMemberStatus.ADMINISTRATOR,
-            ChatMemberStatus.OWNER,
+            ChatMemberStatus.OWNER
         )
 
     except TelegramError:
@@ -464,11 +539,7 @@ async def is_subscribed(bot, user_id, channel):
 
 
 async def check_sponsor(bot, user_id):
-    return await is_subscribed(
-        bot,
-        user_id,
-        SPONSOR_CHANNEL
-    )
+    return await is_subscribed(bot, user_id)
 
 
 def sponsor_keyboard():
@@ -497,12 +568,15 @@ async def show_sponsor(update):
     )
 
     if update.callback_query:
+
         await update.callback_query.edit_message_text(
             text,
             parse_mode="HTML",
             reply_markup=sponsor_keyboard()
         )
+
     else:
+
         await update.effective_message.reply_text(
             text,
             parse_mode="HTML",
@@ -526,7 +600,7 @@ def main_keyboard():
                 "📱 NOMER OLISH"
             ],
             [
-                "📈 PROMO XIZMATLARI",
+                "📈 NAKRUTKA",
                 "🛍 DO‘KON"
             ],
             [
@@ -550,11 +624,12 @@ async def start(update, context):
         user.username
     )
 
-    # =====================================================
+    # -----------------------------------------------------
     # REFERAL
-    # =====================================================
+    # -----------------------------------------------------
 
     if is_new and context.args:
+
         try:
             referrer_id = int(context.args[0])
         except Exception:
@@ -565,15 +640,17 @@ async def start(update, context):
             and referrer_id != user.id
             and get_user(referrer_id)
         ):
+
             conn = db()
 
-            already = conn.execute("""
+            current = conn.execute("""
                 SELECT referred_by
                 FROM users
                 WHERE id=?
             """, (user.id,)).fetchone()
 
-            if already and already["referred_by"] is None:
+            if current and current["referred_by"] is None:
+
                 conn.execute("""
                     UPDATE users
                     SET referred_by=?
@@ -583,20 +660,35 @@ async def start(update, context):
                     user.id
                 ))
 
+                # STARS ALOHIDA
                 conn.execute("""
                     UPDATE users
                     SET referrals=referrals+1,
-                        points=points+?,
-                        money_balance=money_balance+?
+                        points=points+?
                     WHERE id=?
                 """, (
                     REFERRAL_STARS,
-                    REFERRAL_MONEY,
+                    referrer_id
+                ))
+
+                # BONUS PUL ALOHIDA
+                conn.execute("""
+                    UPDATE users
+                    SET bonus_balance=bonus_balance+?,
+                        money_balance=money_balance+?
+                    WHERE id=?
+                """, (
+                    REFERRAL_BONUS,
+                    REFERRAL_BONUS,
                     referrer_id
                 ))
 
             conn.commit()
             conn.close()
+
+    # -----------------------------------------------------
+    # SPONSOR
+    # -----------------------------------------------------
 
     if not await check_sponsor(
         context.bot,
@@ -619,17 +711,21 @@ async def start(update, context):
 # =========================================================
 
 async def money_work(update, context):
+
     user = get_user(update.effective_user.id)
 
-    referrals = int(user["referrals"] or 0)
-    money = float(user["money_balance"] or 0)
+    bonus = float(user["bonus_balance"] or 0)
+    real = float(user["real_balance"] or 0)
+    refs = int(user["referrals"] or 0)
 
     await update.message.reply_text(
         "💰 <b>PUL ISHLASH</b>\n\n"
-        f"💵 Virtual balans: <b>{money:,.0f} so‘m</b>\n"
-        f"👥 Referallar: <b>{referrals}</b>\n\n"
-        "👤 Har bir referal: <b>+500 so‘m</b>\n\n"
-        "Pul va Stars balanslari alohida.",
+        f"🎁 Bonus pul: <b>{bonus:,.0f} so‘m</b>\n"
+        f"💳 Kiritilgan pul: <b>{real:,.0f} so‘m</b>\n"
+        f"👥 Referallar: <b>{refs}</b>\n\n"
+        f"🗣 1 referal = <b>+{REFERRAL_BONUS:,.0f} so‘m bonus</b>\n\n"
+        "🎁 Bonus pul faqat yechib olish uchun.\n"
+        "💳 Kiritilgan pul esa xizmat va mahsulotlarga ishlatiladi.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [
@@ -640,7 +736,7 @@ async def money_work(update, context):
             ],
             [
                 InlineKeyboardButton(
-                    "💸 PUL YECHISH",
+                    "💸 BONUSNI YECHISH",
                     callback_data="money_withdraw"
                 )
             ]
@@ -653,15 +749,17 @@ async def money_work(update, context):
 # =========================================================
 
 async def stars_work(update, context):
+
     user = get_user(update.effective_user.id)
+
+    stars = float(user["points"] or 0)
+    refs = int(user["referrals"] or 0)
 
     await update.message.reply_text(
         "⭐ <b>STARS ISHLASH</b>\n\n"
-        f"⭐ Stars balans: <b>{float(user['points'] or 0):.2f}</b>\n"
-        f"👥 Referallar: <b>{int(user['referrals'] or 0)}</b>\n\n"
-        f"👤 Har bir referal: "
-        f"<b>+{REFERRAL_STARS:g} ⭐</b>\n\n"
-        "Stars va pul balanslari alohida.",
+        f"⭐ Stars: <b>{stars:.2f}</b>\n"
+        f"👥 Referallar: <b>{refs}</b>\n\n"
+        f"🗣 1 referal = <b>+{REFERRAL_STARS:g} ⭐</b>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [
@@ -679,22 +777,21 @@ async def stars_work(update, context):
 # =========================================================
 
 async def premium_work(update, context):
+
     user = get_user(update.effective_user.id)
 
-    referrals = int(user["referrals"] or 0)
+    refs = int(user["referrals"] or 0)
 
-    one = int(user["premium_1m"] or 0)
-    three = int(user["premium_3m"] or 0)
+    p1 = int(user["premium_1m"] or 0)
+    p3 = int(user["premium_3m"] or 0)
 
     await update.message.reply_text(
         "💎 <b>PREMIUM ISHLASH</b>\n\n"
-        f"👥 Referallar: <b>{referrals}</b>\n\n"
+        f"👥 Referallar: <b>{refs}</b>\n\n"
         "🎁 25 referal → 1 oy Premium\n"
         "🎁 70 referal → 3 oy Premium\n\n"
-        f"1 oy mukofot: "
-        f"{'✅ Olingan' if one else '⏳ Kutilmoqda'}\n"
-        f"3 oy mukofot: "
-        f"{'✅ Olingan' if three else '⏳ Kutilmoqda'}",
+        f"1 oy: {'✅ Olingan' if p1 else '⏳ Kutilmoqda'}\n"
+        f"3 oy: {'✅ Olingan' if p3 else '⏳ Kutilmoqda'}",
         parse_mode="HTML"
     )
 
@@ -704,8 +801,8 @@ async def premium_work(update, context):
 # =========================================================
 
 async def referral(update, context):
-    user_id = update.effective_user.id
 
+    user_id = update.effective_user.id
     user = get_user(user_id)
 
     if not user:
@@ -713,15 +810,15 @@ async def referral(update, context):
 
     me = await context.bot.get_me()
 
-    referrals = int(user["referrals"] or 0)
-
     link = f"https://t.me/{me.username}?start={user_id}"
+
+    refs = int(user["referrals"] or 0)
 
     await update.effective_message.reply_text(
         "👥 <b>REFERAL</b>\n\n"
-        f"👤 Referallar: <b>{referrals}</b>\n"
+        f"👥 Referallar: <b>{refs}</b>\n"
         f"⭐ Har biri: <b>+{REFERRAL_STARS:g} ⭐</b>\n"
-        f"💰 Har biri: <b>+{REFERRAL_MONEY:,.0f} so‘m</b>\n\n"
+        f"🎁 Har biri: <b>+{REFERRAL_BONUS:,.0f} so‘m bonus</b>\n\n"
         f"🔗 Referal linkingiz:\n"
         f"<code>{link}</code>",
         parse_mode="HTML"
@@ -729,13 +826,15 @@ async def referral(update, context):
 
 
 # =========================================================
-# NOMER OLISH
+# NOMER
 # =========================================================
 
 async def numbers_menu(update, context):
+
     buttons = []
 
     for country, price in NUMBERS.items():
+
         buttons.append([
             InlineKeyboardButton(
                 f"{country} — {price:,} so‘m",
@@ -752,6 +851,7 @@ async def numbers_menu(update, context):
 
 
 async def number_country(update, context, country):
+
     price = NUMBERS.get(country)
 
     if price is None:
@@ -760,7 +860,7 @@ async def number_country(update, context, country):
     await update.callback_query.edit_message_text(
         f"📱 <b>{country}</b>\n\n"
         f"💰 Narx: <b>{price:,} so‘m</b>\n\n"
-        "Buyurtma berish uchun tugmani bosing.",
+        "Buyurtma berish uchun:",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [
@@ -774,14 +874,39 @@ async def number_country(update, context, country):
 
 
 # =========================================================
+# BALANS TEKSHIRISH
+# =========================================================
+
+def real_balance(user_id):
+
+    user = get_user(user_id)
+
+    if not user:
+        return 0
+
+    return float(user["real_balance"] or 0)
+
+
+# =========================================================
 # NOMER BUYURTMA
 # =========================================================
 
 async def create_number_order(update, context, country):
+
     user_id = update.effective_user.id
     price = NUMBERS.get(country)
 
     if price is None:
+        return
+
+    balance = real_balance(user_id)
+
+    if balance < price:
+
+        await update.callback_query.answer(
+            f"Balansingiz yetarli emas. Kerak: {price:,} so‘m",
+            show_alert=True
+        )
         return
 
     target = (
@@ -791,6 +916,18 @@ async def create_number_order(update, context, country):
     )
 
     conn = db()
+
+    # BALANSDAN AYIRISH
+    conn.execute("""
+        UPDATE users
+        SET real_balance=real_balance-?,
+            total_spent=total_spent+?
+        WHERE id=?
+    """, (
+        price,
+        price,
+        user_id
+    ))
 
     cur = conn.execute("""
         INSERT INTO service_orders (
@@ -803,10 +940,9 @@ async def create_number_order(update, context, country):
             created_at,
             link
         )
-        VALUES (?, ?, ?, ?, ?, 'pending', ?, '')
+        VALUES (?, 'number', ?, ?, ?, 'pending', ?, '')
     """, (
         user_id,
-        "number",
         f"Nomer — {country}",
         price,
         target,
@@ -823,7 +959,7 @@ async def create_number_order(update, context, country):
         f"📱 Davlat: <b>{country}</b>\n"
         f"💰 Narx: <b>{price:,} so‘m</b>\n"
         f"🆔 Buyurtma: <code>#{order_id}</code>\n\n"
-        "Admin siz bilan bog‘lanib, raqamni qo‘lda beradi.",
+        "Admin raqamni qo‘lda yuboradi.",
         parse_mode="HTML"
     )
 
@@ -834,39 +970,43 @@ async def create_number_order(update, context, country):
 
 
 # =========================================================
-# PROMO
+# NAKRUTKA
 # =========================================================
 
-async def promo_menu(update, context):
+async def nakrutka_menu(update, context):
+
     buttons = []
 
-    for platform in PROMO:
+    for platform in NAKRUTKA:
+
         buttons.append([
             InlineKeyboardButton(
                 f"📈 {platform}",
-                callback_data=f"promo_platform:{platform}"
+                callback_data=f"nak_platform:{platform}"
             )
         ])
 
     await update.message.reply_text(
-        "📈 <b>PROMO XIZMATLARI</b>\n\n"
+        "📈 <b>NAKRUTKA</b>\n\n"
         "Platformani tanlang:",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
 
-async def promo_platform(update, context, platform):
-    if platform not in PROMO:
+async def nak_platform(update, context, platform):
+
+    if platform not in NAKRUTKA:
         return
 
     buttons = []
 
-    for quantity, price in PROMO[platform].items():
+    for quantity, price in NAKRUTKA[platform].items():
+
         buttons.append([
             InlineKeyboardButton(
                 f"{quantity} — {price:,} so‘m",
-                callback_data=f"promo:{platform}:{quantity}"
+                callback_data=f"nak:{platform}:{quantity}"
             )
         ])
 
@@ -878,36 +1018,37 @@ async def promo_platform(update, context, platform):
     )
 
 
-async def promo_quantity(update, context, platform, quantity):
-    if platform not in PROMO:
+async def nak_quantity(update, context, platform, quantity):
+
+    if platform not in NAKRUTKA:
         return
 
-    if quantity not in PROMO[platform]:
+    if quantity not in NAKRUTKA[platform]:
         return
 
-    price = PROMO[platform][quantity]
+    price = NAKRUTKA[platform][quantity]
 
-    context.user_data["promo_order"] = {
+    context.user_data["nak_order"] = {
         "platform": platform,
         "quantity": quantity,
-        "price": price,
+        "price": price
     }
 
-    context.user_data["waiting_promo_link"] = True
+    context.user_data["waiting_nak_link"] = True
 
     await update.callback_query.edit_message_text(
         "🔗 <b>LINKNI YUBORING</b>\n\n"
         f"📈 Platforma: <b>{platform}</b>\n"
         f"📊 Miqdor: <b>{quantity}</b>\n"
         f"💰 Narx: <b>{price:,} so‘m</b>\n\n"
-        "Endi reklama qilinadigan kanal/video/profil "
-        "linkini yuboring.",
+        "Profil / kanal / video linkini yuboring.",
         parse_mode="HTML"
     )
 
 
-async def process_promo_link(update, context):
-    if not context.user_data.get("waiting_promo_link"):
+async def process_nak_link(update, context):
+
+    if not context.user_data.get("waiting_nak_link"):
         return False
 
     if not update.message or not update.message.text:
@@ -915,21 +1056,47 @@ async def process_promo_link(update, context):
 
     link = update.message.text.strip()
 
-    order = context.user_data.get("promo_order")
+    order = context.user_data.get("nak_order")
 
     if not order:
-        context.user_data.pop("waiting_promo_link", None)
         return True
 
     if len(link) < 3:
+
         await update.message.reply_text(
             "❌ Linkni to‘g‘ri yuboring."
         )
         return True
 
     user_id = update.effective_user.id
+    price = order["price"]
+
+    balance = real_balance(user_id)
+
+    if balance < price:
+
+        context.user_data.pop("waiting_nak_link", None)
+        context.user_data.pop("nak_order", None)
+
+        await update.message.reply_text(
+            f"❌ Balansingiz yetarli emas.\n\n"
+            f"Kerak: {price:,} so‘m\n"
+            f"Balans: {balance:,.0f} so‘m"
+        )
+        return True
 
     conn = db()
+
+    conn.execute("""
+        UPDATE users
+        SET real_balance=real_balance-?,
+            total_spent=total_spent+?
+        WHERE id=?
+    """, (
+        price,
+        price,
+        user_id
+    ))
 
     cur = conn.execute("""
         INSERT INTO service_orders (
@@ -942,13 +1109,11 @@ async def process_promo_link(update, context):
             created_at,
             link
         )
-        VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+        VALUES (?, 'nakrutka', ?, ?, '', 'pending', ?, ?)
     """, (
         user_id,
-        "promo",
         f"{order['platform']} {order['quantity']}",
-        order["price"],
-        "",
+        price,
         now_iso(),
         link
     ))
@@ -958,16 +1123,15 @@ async def process_promo_link(update, context):
     conn.commit()
     conn.close()
 
-    context.user_data.pop("waiting_promo_link", None)
-    context.user_data.pop("promo_order", None)
+    context.user_data.pop("waiting_nak_link", None)
+    context.user_data.pop("nak_order", None)
 
     await update.message.reply_text(
-        "✅ <b>PROMO BUYURTMA YUBORILDI</b>\n\n"
-        f"📈 Xizmat: <b>{order['platform']}</b>\n"
-        f"📊 Miqdor: <b>{order['quantity']}</b>\n"
-        f"💰 Narx: <b>{order['price']:,} so‘m</b>\n"
-        f"🆔 Buyurtma: <code>#{order_id}</code>\n\n"
-        "Admin buyurtmani ko‘rib chiqadi.",
+        "✅ <b>NAKRUTKA BUYURTMASI YUBORILDI</b>\n\n"
+        f"📈 {order['platform']}\n"
+        f"📊 {order['quantity']}\n"
+        f"💰 {price:,} so‘m\n"
+        f"🆔 #{order_id}",
         parse_mode="HTML"
     )
 
@@ -980,13 +1144,14 @@ async def process_promo_link(update, context):
 
 
 # =========================================================
-# SHOP
+# DO‘KON
 # =========================================================
 
 async def shop(update, context):
+
     await update.message.reply_text(
         "🛍 <b>DO‘KON</b>\n\n"
-        "Kerakli xizmatni tanlang:",
+        "Mahsulotni tanlang:",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [
@@ -1006,9 +1171,11 @@ async def shop(update, context):
 
 
 async def shop_stars(update, context):
+
     buttons = []
 
     for stars, price in STARS_PRICES.items():
+
         buttons.append([
             InlineKeyboardButton(
                 f"{stars} ⭐ — {price:,} so‘m",
@@ -1025,9 +1192,11 @@ async def shop_stars(update, context):
 
 
 async def shop_premium(update, context):
+
     buttons = []
 
     for months, price in PREMIUM_PRICES.items():
+
         buttons.append([
             InlineKeyboardButton(
                 f"{months} oy — {price:,} so‘m",
@@ -1048,6 +1217,7 @@ async def shop_premium(update, context):
 # =========================================================
 
 async def target_menu(update, context):
+
     await update.callback_query.edit_message_text(
         "👤 <b>KIM UCHUN?</b>\n\n"
         "Xizmat kimga beriladi?",
@@ -1074,20 +1244,22 @@ async def target_menu(update, context):
 # =========================================================
 
 async def payment_menu(update, context):
-    card = PAYMENT_CARD
 
-    if not card:
-        card = "PAYMENT_CARD Secret topilmadi"
+    text = (
+        "💳 <b>HISOB TO‘LDIRISH</b>\n\n"
+        "To‘lov tizimi: 💳 Karta orqali\n\n"
+        f"Karta: <code>{PAYMENT_CARD}</code>\n"
+        f"ID: <code>{ADMIN_ID}</code>\n\n"
+        "💳 <b>Hisobni to‘ldirish tartibi</b>\n\n"
+        "1. Kartaga kerakli summani o‘tkazing\n"
+        "2. «💸 TO‘LOV QILDIM» tugmasini bosing\n"
+        "3. O‘tkazgan summani kiriting\n"
+        "4. To‘lov chekini yuboring\n\n"
+        "⏳ Tasdiqlash muddati: 5 daqiqa – 24 soat"
+    )
 
     await update.message.reply_text(
-        "💳 <b>HISOB TO‘LDIRISH</b>\n\n"
-        f"💳 Karta: <code>{card}</code>\n"
-        f"👤 Karta egasi: <b>{PAYMENT_OWNER}</b>\n\n"
-        "To‘lov qilgach:\n"
-        "1️⃣ <b>💸 TO‘LOV QILDIM</b> ni bosing\n"
-        "2️⃣ Chek rasmini yuboring\n"
-        "3️⃣ Chek adminga keladi\n"
-        "4️⃣ Admin tekshiradi",
+        text,
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [
@@ -1101,24 +1273,35 @@ async def payment_menu(update, context):
 
 
 async def payment_done(update, context):
-    context.user_data["waiting_receipt"] = True
+
+    context.user_data["waiting_payment_amount"] = True
 
     await update.callback_query.edit_message_text(
-        "📸 <b>CHEKNI YUBORING</b>\n\n"
-        "To‘lov chekini rasm ko‘rinishida yuboring.",
+        "💵 <b>To‘lov miqdorini kiriting:</b>\n\n"
+        "Minimal: <b>1 000 so‘m</b>\n\n"
+        "Masalan: <code>4799</code>",
         parse_mode="HTML"
     )
 
 
 async def receive_receipt(update, context):
+
     if not context.user_data.get("waiting_receipt"):
         return False
 
     if not update.message.photo:
+
         await update.message.reply_text(
             "❌ Chekni rasm ko‘rinishida yuboring."
         )
         return True
+
+    amount = float(
+        context.user_data.get(
+            "payment_amount",
+            0
+        )
+    )
 
     user = update.effective_user
     photo = update.message.photo[-1]
@@ -1133,9 +1316,10 @@ async def receive_receipt(update, context):
             status,
             created_at
         )
-        VALUES (?, 0, ?, 'pending', ?)
+        VALUES (?, ?, ?, 'pending', ?)
     """, (
         user.id,
+        amount,
         photo.file_id,
         now_iso()
     ))
@@ -1145,7 +1329,8 @@ async def receive_receipt(update, context):
     conn.commit()
     conn.close()
 
-    context.user_data["waiting_receipt"] = False
+    context.user_data.pop("waiting_receipt", None)
+    context.user_data.pop("payment_amount", None)
 
     username = (
         f"@{user.username}"
@@ -1173,8 +1358,9 @@ async def receive_receipt(update, context):
             "💳 <b>YANGI TO‘LOV CHEKI</b>\n\n"
             f"🆔 So‘rov: <code>#{request_id}</code>\n"
             f"👤 User: {username}\n"
-            f"🆔 ID: <code>{user.id}</code>\n\n"
-            "⚠️ Chekni tekshiring."
+            f"🆔 ID: <code>{user.id}</code>\n"
+            f"💵 Kiritilgan summa: <b>{amount:,.0f} so‘m</b>\n\n"
+            "⚠️ Kartaga tushgan summani tekshiring."
         ),
         parse_mode="HTML",
         reply_markup=keyboard
@@ -1182,7 +1368,8 @@ async def receive_receipt(update, context):
 
     await update.message.reply_text(
         "✅ <b>CHEK YUBORILDI</b>\n\n"
-        "Chekingiz adminga yuborildi.",
+        f"💵 Summa: <b>{amount:,.0f} so‘m</b>\n"
+        "⏳ Admin tekshiradi.",
         parse_mode="HTML"
     )
 
@@ -1194,12 +1381,14 @@ async def receive_receipt(update, context):
 # =========================================================
 
 async def my_account(update, context):
+
     user = get_user(update.effective_user.id)
 
     if not user:
         return
 
-    money = float(user["money_balance"] or 0)
+    real = float(user["real_balance"] or 0)
+    bonus = float(user["bonus_balance"] or 0)
     stars = float(user["points"] or 0)
     refs = int(user["referrals"] or 0)
 
@@ -1211,18 +1400,25 @@ async def my_account(update, context):
         WHERE user_id=?
     """, (user["id"],)).fetchone()["c"]
 
+    deposited = conn.execute("""
+        SELECT COALESCE(SUM(amount),0)
+        FROM payment_requests
+        WHERE user_id=?
+        AND status='approved'
+    """, (user["id"],)).fetchone()[0]
+
     conn.close()
 
     await update.message.reply_text(
         "👤 <b>MENING HISOBIM</b>\n\n"
-        f"💰 Pul: <b>{money:,.0f} so‘m</b>\n"
+        f"💰 Pul: <b>{real:,.2f} so‘m</b>\n"
+        f"🎁 Bonus pul: <b>{bonus:,.2f} so‘m</b>\n"
         f"⭐ Stars: <b>{stars:.2f}</b>\n"
         f"👥 Referallar: <b>{refs}</b>\n"
-        f"🛍 Buyurtmalar: <b>{orders}</b>\n\n"
-        f"💎 Premium 1 oy: "
-        f"{'✅' if user['premium_1m'] else '❌'}\n"
-        f"💎 Premium 3 oy: "
-        f"{'✅' if user['premium_3m'] else '❌'}",
+        f"🛍 Buyurtmalar: <b>{orders}</b>\n"
+        f"💳 Kiritgan pullaringiz: <b>{float(deposited or 0):,.2f} so‘m</b>\n"
+        f"💸 Jami sarflagan pul: <b>{float(user['total_spent'] or 0):,.2f} so‘m</b>\n\n"
+        f"👤 Sizning ID raqamingiz: <code>{user['id']}</code>",
         parse_mode="HTML"
     )
 
@@ -1232,24 +1428,46 @@ async def my_account(update, context):
 # =========================================================
 
 async def money_withdraw(update, context):
+
     user = get_user(update.effective_user.id)
 
-    money = float(user["money_balance"] or 0)
+    bonus = float(user["bonus_balance"] or 0)
 
-    if money < MIN_MONEY_WITHDRAW:
+    if bonus < MIN_WITHDRAW:
+
         await update.effective_message.reply_text(
-            "💸 <b>PUL YECHISH</b>\n\n"
-            f"Minimal: <b>{MIN_MONEY_WITHDRAW:,} so‘m</b>\n"
-            f"Sizda: <b>{money:,.0f} so‘m</b>",
+            "💸 <b>BONUS PUL YECHISH</b>\n\n"
+            f"Minimal: <b>{MIN_WITHDRAW:,} so‘m</b>\n"
+            f"Bonus balansingiz: <b>{bonus:,.0f} so‘m</b>\n\n"
+            "🎁 Bonus pul faqat yechib olish uchun.",
             parse_mode="HTML"
+        )
+        return
+
+    conn = db()
+
+    pending = conn.execute("""
+        SELECT id
+        FROM money_withdrawals
+        WHERE user_id=?
+        AND status='pending'
+    """, (update.effective_user.id,)).fetchone()
+
+    conn.close()
+
+    if pending:
+
+        await update.effective_message.reply_text(
+            "⏳ Sizda allaqachon pending pul yechish so‘rovi bor."
         )
         return
 
     context.user_data["money_withdraw"] = True
 
     await update.effective_message.reply_text(
-        "💸 <b>PUL YECHISH</b>\n\n"
-        f"Balans: <b>{money:,.0f} so‘m</b>\n\n"
+        "💸 <b>BONUS PUL YECHISH</b>\n\n"
+        f"🎁 Bonus balans: <b>{bonus:,.0f} so‘m</b>\n"
+        f"Minimal: <b>{MIN_WITHDRAW:,} so‘m</b>\n\n"
         "Qancha yechmoqchisiz?\n"
         "Masalan: <code>10000</code>",
         parse_mode="HTML"
@@ -1257,6 +1475,7 @@ async def money_withdraw(update, context):
 
 
 async def process_money_withdraw(update, context):
+
     if not context.user_data.get("money_withdraw"):
         return
 
@@ -1265,30 +1484,35 @@ async def process_money_withdraw(update, context):
 
     try:
         amount = float(
-            update.message.text.replace(",", "").strip()
+            update.message.text.replace(",", "").replace(" ", "")
         )
     except Exception:
+
         await update.message.reply_text(
             "❌ Faqat raqam kiriting."
         )
         return
 
-    context.user_data.pop("money_withdraw", None)
-
     user_id = update.effective_user.id
+
     user = get_user(user_id)
 
-    balance = float(user["money_balance"] or 0)
+    if not user:
+        return
 
-    if amount < MIN_MONEY_WITHDRAW:
+    bonus = float(user["bonus_balance"] or 0)
+
+    if amount < MIN_WITHDRAW:
+
         await update.message.reply_text(
-            f"❌ Minimal {MIN_MONEY_WITHDRAW:,} so‘m."
+            f"❌ Minimal {MIN_WITHDRAW:,} so‘m."
         )
         return
 
-    if amount > balance:
+    if amount > bonus:
+
         await update.message.reply_text(
-            "❌ Balansingiz yetarli emas."
+            "❌ Bonus balansingiz yetarli emas."
         )
         return
 
@@ -1302,12 +1526,24 @@ async def process_money_withdraw(update, context):
     """, (user_id,)).fetchone()
 
     if pending:
+
         conn.close()
+        context.user_data.pop("money_withdraw", None)
 
         await update.message.reply_text(
-            "⏳ Sizda allaqachon pending so‘rov mavjud."
+            "⏳ Sizda pending so‘rov mavjud."
         )
         return
+
+    # BONUSNI REZERV QILAMIZ
+    conn.execute("""
+        UPDATE users
+        SET bonus_balance=bonus_balance-?
+        WHERE id=?
+    """, (
+        amount,
+        user_id
+    ))
 
     cur = conn.execute("""
         INSERT INTO money_withdrawals (
@@ -1328,19 +1564,21 @@ async def process_money_withdraw(update, context):
     conn.commit()
     conn.close()
 
+    context.user_data.pop("money_withdraw", None)
+
     await update.message.reply_text(
         "✅ <b>SO‘ROV YUBORILDI</b>\n\n"
-        f"💰 Miqdor: <b>{amount:,.0f} so‘m</b>\n"
-        "⏳ Holat: <b>Pending</b>",
+        f"🎁 Bonus: <b>{amount:,.0f} so‘m</b>\n"
+        "⏳ Admin ko‘rib chiqadi.",
         parse_mode="HTML"
     )
 
     await context.bot.send_message(
         ADMIN_ID,
-        "💰 <b>YANGI PUL YECHISH</b>\n\n"
-        f"🆔 User: <code>{user_id}</code>\n"
+        "💸 <b>YANGI BONUS YECHISH</b>\n\n"
+        f"👤 User ID: <code>{user_id}</code>\n"
         f"💰 Miqdor: <b>{amount:,.0f} so‘m</b>\n"
-        f"📌 ID: <code>{withdrawal_id}</code>",
+        f"🆔 So‘rov: <code>#{withdrawal_id}</code>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [
@@ -1362,6 +1600,7 @@ async def process_money_withdraw(update, context):
 # =========================================================
 
 async def send_order_to_admin(context, order_id):
+
     conn = db()
 
     row = conn.execute("""
@@ -1377,14 +1616,15 @@ async def send_order_to_admin(context, order_id):
 
     user = get_user(row["user_id"])
 
-    username = "Username yo‘q"
-
-    if user and user["username"]:
-        username = f"@{user['username']}"
+    username = (
+        f"@{user['username']}"
+        if user and user["username"]
+        else "Username yo‘q"
+    )
 
     text = (
-        "🛍 <b>YANGI BUYURTMA</b>\n\n"
-        f"🆔 ID: <code>#{row['id']}</code>\n"
+        "🛍 <b>YANGI ZAYAVKA</b>\n\n"
+        f"🆔 Buyurtma: <code>#{row['id']}</code>\n"
         f"👤 User: {username}\n"
         f"🆔 User ID: <code>{row['user_id']}</code>\n"
         f"🛍 Xizmat: <b>{row['item']}</b>\n"
@@ -1393,30 +1633,26 @@ async def send_order_to_admin(context, order_id):
     )
 
     if row["link"]:
-        text += (
-            f"🔗 Link: <code>{row['link']}</code>\n"
-        )
+        text += f"🔗 Link: <code>{row['link']}</code>\n"
 
     text += "\n⏳ Holat: <b>PENDING</b>"
-
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "✅ BAJARILDI",
-                callback_data=f"order_done:{row['id']}"
-            ),
-            InlineKeyboardButton(
-                "❌ RAD ETISH",
-                callback_data=f"order_reject:{row['id']}"
-            )
-        ]
-    ])
 
     await context.bot.send_message(
         ADMIN_ID,
         text,
         parse_mode="HTML",
-        reply_markup=keyboard
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton(
+                    "✅ BAJARILDI",
+                    callback_data=f"order_done:{row['id']}"
+                ),
+                InlineKeyboardButton(
+                    "❌ RAD ETISH",
+                    callback_data=f"order_reject:{row['id']}"
+                )
+            ]
+        ])
     )
 
 
@@ -1425,21 +1661,24 @@ async def send_order_to_admin(context, order_id):
 # =========================================================
 
 async def callbacks(update, context):
+
     query = update.callback_query
     data = query.data or ""
     user_id = query.from_user.id
 
     await query.answer()
 
-    # =====================================================
+    # -----------------------------------------------------
     # SPONSOR
-    # =====================================================
+    # -----------------------------------------------------
 
     if data == "check_sponsor":
+
         if not await check_sponsor(
             context.bot,
             user_id
         ):
+
             await query.answer(
                 "❌ Avval kanalga obuna bo‘ling!",
                 show_alert=True
@@ -1458,24 +1697,31 @@ async def callbacks(update, context):
         )
         return
 
-    # =====================================================
-    # PAYMENT DONE
-    # =====================================================
+    # -----------------------------------------------------
+    # PAYMENT
+    # -----------------------------------------------------
 
     if data == "payment_done":
-        await payment_done(update, context)
+
+        await payment_done(
+            update,
+            context
+        )
         return
 
-    # =====================================================
+    # -----------------------------------------------------
     # PAYMENT APPROVE
-    # =====================================================
+    # -----------------------------------------------------
 
     if data.startswith("payment_approve:"):
+
         if user_id != ADMIN_ID:
             return
 
         try:
-            request_id = int(data.split(":")[1])
+            request_id = int(
+                data.split(":")[1]
+            )
         except Exception:
             return
 
@@ -1487,56 +1733,44 @@ async def callbacks(update, context):
             WHERE id=?
         """, (request_id,)).fetchone()
 
+        conn.close()
+
         if not row or row["status"] != "pending":
-            conn.close()
 
             await query.answer(
-                "Bu so‘rov allaqachon ko‘rilgan.",
+                "Bu to‘lov allaqachon ko‘rilgan.",
                 show_alert=True
             )
             return
 
-        conn.execute("""
-            UPDATE payment_requests
-            SET status='approved',
-                processed_at=?
-            WHERE id=?
-        """, (
-            now_iso(),
-            request_id
-        ))
+        # ADMIN SUMMANI O'ZI KIRITADI
+        context.user_data["credit_payment_id"] = request_id
 
-        conn.commit()
-        conn.close()
-
-        try:
-            await query.edit_message_caption(
-                caption=(
-                    query.message.caption or ""
-                ) + "\n\n✅ <b>TASDIQLANDI</b>",
-                parse_mode="HTML"
-            )
-        except Exception:
-            pass
-
-        await context.bot.send_message(
-            row["user_id"],
-            "✅ <b>TO‘LOV CHEKI TASDIQLANDI</b>\n\n"
-            "Admin chekingizni tasdiqladi.",
+        await query.message.reply_text(
+            "💰 <b>BALANSGA QANCHA QO‘SHILSIN?</b>\n\n"
+            f"👤 User ID: <code>{row['user_id']}</code>\n"
+            f"💵 Foydalanuvchi yozgan summa: <b>{float(row['amount'] or 0):,.0f} so‘m</b>\n\n"
+            "Kartaga tushgan summani tekshirib,\n"
+            "balansga qo‘shiladigan summani yozing.\n\n"
+            "Masalan: <code>7809</code>",
             parse_mode="HTML"
         )
+
         return
 
-    # =====================================================
+    # -----------------------------------------------------
     # PAYMENT REJECT
-    # =====================================================
+    # -----------------------------------------------------
 
     if data.startswith("payment_reject:"):
+
         if user_id != ADMIN_ID:
             return
 
         try:
-            request_id = int(data.split(":")[1])
+            request_id = int(
+                data.split(":")[1]
+            )
         except Exception:
             return
 
@@ -1549,10 +1783,11 @@ async def callbacks(update, context):
         """, (request_id,)).fetchone()
 
         if not row or row["status"] != "pending":
+
             conn.close()
 
             await query.answer(
-                "Bu so‘rov allaqachon ko‘rilgan.",
+                "Bu to‘lov allaqachon ko‘rilgan.",
                 show_alert=True
             )
             return
@@ -1572,9 +1807,8 @@ async def callbacks(update, context):
 
         try:
             await query.edit_message_caption(
-                caption=(
-                    query.message.caption or ""
-                ) + "\n\n❌ <b>RAD ETILDI</b>",
+                (query.message.caption or "")
+                + "\n\n❌ <b>RAD ETILDI</b>",
                 parse_mode="HTML"
             )
         except Exception:
@@ -1582,34 +1816,47 @@ async def callbacks(update, context):
 
         await context.bot.send_message(
             row["user_id"],
-            "❌ <b>TO‘LOV CHEKI RAD ETILDI</b>\n\n"
-            "Admin chekingizni tasdiqlamadi.",
+            "❌ <b>TO‘LOV RAD ETILDI</b>\n\n"
+            "Chek tasdiqlanmadi.",
             parse_mode="HTML"
+        )
+
+        return
+
+    # -----------------------------------------------------
+    # REFERRAL
+    # -----------------------------------------------------
+
+    if data == "referral":
+
+        await referral(
+            update,
+            context
         )
         return
 
-    # =====================================================
-    # REFERRAL
-    # =====================================================
-
-    if data == "referral":
-        await referral(update, context)
-        return
-
-    # =====================================================
-    # MONEY WITHDRAW
-    # =====================================================
+    # -----------------------------------------------------
+    # WITHDRAW
+    # -----------------------------------------------------
 
     if data == "money_withdraw":
-        await money_withdraw(update, context)
+
+        await money_withdraw(
+            update,
+            context
+        )
         return
 
-    # =====================================================
-    # NUMBER COUNTRY
-    # =====================================================
+    # -----------------------------------------------------
+    # NUMBER
+    # -----------------------------------------------------
 
     if data.startswith("number:"):
-        country = data.split(":", 1)[1]
+
+        country = data.split(
+            ":",
+            1
+        )[1]
 
         await number_country(
             update,
@@ -1618,12 +1865,12 @@ async def callbacks(update, context):
         )
         return
 
-    # =====================================================
-    # NUMBER ORDER
-    # =====================================================
-
     if data.startswith("order_number:"):
-        country = data.split(":", 1)[1]
+
+        country = data.split(
+            ":",
+            1
+        )[1]
 
         await create_number_order(
             update,
@@ -1632,25 +1879,26 @@ async def callbacks(update, context):
         )
         return
 
-    # =====================================================
-    # PROMO PLATFORM
-    # =====================================================
+    # -----------------------------------------------------
+    # NAKRUTKA
+    # -----------------------------------------------------
 
-    if data.startswith("promo_platform:"):
-        platform = data.split(":", 1)[1]
+    if data.startswith("nak_platform:"):
 
-        await promo_platform(
+        platform = data.split(
+            ":",
+            1
+        )[1]
+
+        await nak_platform(
             update,
             context,
             platform
         )
         return
 
-    # =====================================================
-    # PROMO QUANTITY
-    # =====================================================
+    if data.startswith("nak:"):
 
-    if data.startswith("promo:"):
         parts = data.split(":", 2)
 
         if len(parts) != 3:
@@ -1659,7 +1907,7 @@ async def callbacks(update, context):
         platform = parts[1]
         quantity = parts[2]
 
-        await promo_quantity(
+        await nak_quantity(
             update,
             context,
             platform,
@@ -1667,72 +1915,91 @@ async def callbacks(update, context):
         )
         return
 
-    # =====================================================
+    # -----------------------------------------------------
     # SHOP
-    # =====================================================
+    # -----------------------------------------------------
 
     if data == "shop_stars":
-        await shop_stars(update, context)
+
+        await shop_stars(
+            update,
+            context
+        )
         return
 
     if data == "shop_premium":
-        await shop_premium(update, context)
+
+        await shop_premium(
+            update,
+            context
+        )
         return
 
-    # =====================================================
+    # -----------------------------------------------------
     # BUY STARS
-    # =====================================================
+    # -----------------------------------------------------
 
     if data.startswith("buy_stars:"):
+
         try:
-            stars = int(data.split(":")[1])
+            stars = int(
+                data.split(":")[1]
+            )
         except Exception:
             return
 
         if stars not in STARS_PRICES:
             return
 
-        price = STARS_PRICES[stars]
-
         context.user_data["pending_order"] = {
             "category": "stars",
             "item": f"{stars} Stars",
-            "price": price,
+            "price": STARS_PRICES[stars]
         }
 
-        await target_menu(update, context)
+        await target_menu(
+            update,
+            context
+        )
         return
 
-    # =====================================================
+    # -----------------------------------------------------
     # BUY PREMIUM
-    # =====================================================
+    # -----------------------------------------------------
 
     if data.startswith("buy_premium:"):
+
         try:
-            months = int(data.split(":")[1])
+            months = int(
+                data.split(":")[1]
+            )
         except Exception:
             return
 
         if months not in PREMIUM_PRICES:
             return
 
-        price = PREMIUM_PRICES[months]
-
         context.user_data["pending_order"] = {
             "category": "premium",
             "item": f"{months} oy Premium",
-            "price": price,
+            "price": PREMIUM_PRICES[months]
         }
 
-        await target_menu(update, context)
+        await target_menu(
+            update,
+            context
+        )
         return
 
-    # =====================================================
+    # -----------------------------------------------------
     # TARGET SELF
-    # =====================================================
+    # -----------------------------------------------------
 
     if data == "target:self":
-        order = context.user_data.get("pending_order")
+
+        order = context.user_data.get(
+            "pending_order"
+        )
 
         if not order:
             return
@@ -1751,11 +2018,12 @@ async def callbacks(update, context):
         )
         return
 
-    # =====================================================
+    # -----------------------------------------------------
     # TARGET OTHER
-    # =====================================================
+    # -----------------------------------------------------
 
     if data == "target:other":
+
         context.user_data["waiting_target"] = True
 
         await query.edit_message_text(
@@ -1767,16 +2035,19 @@ async def callbacks(update, context):
         )
         return
 
-    # =====================================================
+    # -----------------------------------------------------
     # ADMIN ORDER DONE
-    # =====================================================
+    # -----------------------------------------------------
 
     if data.startswith("order_done:"):
+
         if user_id != ADMIN_ID:
             return
 
         try:
-            order_id = int(data.split(":")[1])
+            order_id = int(
+                data.split(":")[1]
+            )
         except Exception:
             return
 
@@ -1787,16 +2058,19 @@ async def callbacks(update, context):
         )
         return
 
-    # =====================================================
+    # -----------------------------------------------------
     # ADMIN ORDER REJECT
-    # =====================================================
+    # -----------------------------------------------------
 
     if data.startswith("order_reject:"):
+
         if user_id != ADMIN_ID:
             return
 
         try:
-            order_id = int(data.split(":")[1])
+            order_id = int(
+                data.split(":")[1]
+            )
         except Exception:
             return
 
@@ -1807,16 +2081,19 @@ async def callbacks(update, context):
         )
         return
 
-    # =====================================================
-    # ADMIN WITHDRAW APPROVE
-    # =====================================================
+    # -----------------------------------------------------
+    # WITHDRAW APPROVE
+    # -----------------------------------------------------
 
     if data.startswith("withdraw_approve:"):
+
         if user_id != ADMIN_ID:
             return
 
         try:
-            withdrawal_id = int(data.split(":")[1])
+            withdrawal_id = int(
+                data.split(":")[1]
+            )
         except Exception:
             return
 
@@ -1827,16 +2104,19 @@ async def callbacks(update, context):
         )
         return
 
-    # =====================================================
-    # ADMIN WITHDRAW REJECT
-    # =====================================================
+    # -----------------------------------------------------
+    # WITHDRAW REJECT
+    # -----------------------------------------------------
 
     if data.startswith("withdraw_reject:"):
+
         if user_id != ADMIN_ID:
             return
 
         try:
-            withdrawal_id = int(data.split(":")[1])
+            withdrawal_id = int(
+                data.split(":")[1]
+            )
         except Exception:
             return
 
@@ -1847,36 +2127,66 @@ async def callbacks(update, context):
         )
         return
 
-    # =====================================================
-    # ADMIN PANEL
-    # =====================================================
+    # -----------------------------------------------------
+    # ADMIN
+    # -----------------------------------------------------
 
     if data == "admin_stats":
+
         if user_id != ADMIN_ID:
             return
 
-        await admin_stats(update, context)
+        await admin_stats(
+            update,
+            context
+        )
         return
 
     if data == "admin_orders":
+
         if user_id != ADMIN_ID:
             return
 
-        await admin_orders(update, context)
+        await admin_orders(
+            update,
+            context
+        )
         return
 
     if data == "admin_payments":
+
         if user_id != ADMIN_ID:
             return
 
-        await admin_payments(update, context)
+        await admin_payments(
+            update,
+            context
+        )
         return
 
     if data == "admin_withdrawals":
+
         if user_id != ADMIN_ID:
             return
 
-        await admin_withdrawals(update, context)
+        await admin_withdrawals(
+            update,
+            context
+        )
+        return
+
+    if data == "admin_broadcast":
+
+        if user_id != ADMIN_ID:
+            return
+
+        context.user_data["broadcast"] = True
+
+        await query.message.reply_text(
+            "📢 <b>REKLAMA / XABAR</b>\n\n"
+            "Hammaga yuboriladigan matnni yozing.",
+            parse_mode="HTML"
+        )
         return
 
 
@@ -1885,9 +2195,33 @@ async def callbacks(update, context):
 # =========================================================
 
 async def create_order(update, context, order, target):
+
     user_id = update.effective_user.id
+    price = float(order["price"])
+
+    balance = real_balance(user_id)
+
+    if balance < price:
+
+        await update.callback_query.answer(
+            f"Balans yetarli emas. Kerak: {price:,.0f} so‘m",
+            show_alert=True
+        )
+        return
 
     conn = db()
+
+    # HAQIQIY BALANSDAN AYIRILADI
+    conn.execute("""
+        UPDATE users
+        SET real_balance=real_balance-?,
+            total_spent=total_spent+?
+        WHERE id=?
+    """, (
+        price,
+        price,
+        user_id
+    ))
 
     cur = conn.execute("""
         INSERT INTO service_orders (
@@ -1905,7 +2239,7 @@ async def create_order(update, context, order, target):
         user_id,
         order["category"],
         order["item"],
-        order["price"],
+        price,
         target,
         now_iso()
     ))
@@ -1923,10 +2257,10 @@ async def create_order(update, context, order, target):
     await update.callback_query.edit_message_text(
         "✅ <b>BUYURTMA YUBORILDI</b>\n\n"
         f"🛍 Xizmat: <b>{order['item']}</b>\n"
-        f"💰 Narx: <b>{order['price']:,} so‘m</b>\n"
+        f"💰 Narx: <b>{price:,.0f} so‘m</b>\n"
         f"👤 Qabul qiluvchi: <b>{target}</b>\n"
         f"🆔 Buyurtma: <code>#{order_id}</code>\n\n"
-        "Buyurtma admin'ga yuborildi.",
+        "Admin buyurtmani bajaradi.",
         parse_mode="HTML"
     )
 
@@ -1937,10 +2271,11 @@ async def create_order(update, context, order, target):
 
 
 # =========================================================
-# ADMIN ORDER ACTIONS
+# ADMIN ORDER DONE
 # =========================================================
 
 async def admin_finish_order(update, context, order_id):
+
     conn = db()
 
     row = conn.execute("""
@@ -1950,6 +2285,7 @@ async def admin_finish_order(update, context, order_id):
     """, (order_id,)).fetchone()
 
     if not row or row["status"] != "pending":
+
         conn.close()
 
         await update.callback_query.answer(
@@ -1973,9 +2309,8 @@ async def admin_finish_order(update, context, order_id):
 
     try:
         await update.callback_query.edit_message_text(
-            (
-                update.callback_query.message.text or ""
-            ) + "\n\n✅ <b>BAJARILDI</b>",
+            (update.callback_query.message.text or "")
+            + "\n\n✅ <b>BAJARILDI</b>",
             parse_mode="HTML"
         )
     except Exception:
@@ -1983,14 +2318,19 @@ async def admin_finish_order(update, context, order_id):
 
     await context.bot.send_message(
         row["user_id"],
-        f"✅ <b>BUYURTMANGIZ BAJARILDI</b>\n\n"
-        f"🆔 Buyurtma: <code>#{order_id}</code>\n"
+        "✅ <b>BUYURTMANGIZ BAJARILDI</b>\n\n"
+        f"🆔 #{order_id}\n"
         f"🛍 {row['item']}",
         parse_mode="HTML"
     )
 
 
+# =========================================================
+# ADMIN ORDER REJECT
+# =========================================================
+
 async def admin_reject_order(update, context, order_id):
+
     conn = db()
 
     row = conn.execute("""
@@ -2000,6 +2340,7 @@ async def admin_reject_order(update, context, order_id):
     """, (order_id,)).fetchone()
 
     if not row or row["status"] != "pending":
+
         conn.close()
 
         await update.callback_query.answer(
@@ -2007,6 +2348,18 @@ async def admin_reject_order(update, context, order_id):
             show_alert=True
         )
         return
+
+    # PULNI QAYTARAMIZ
+    conn.execute("""
+        UPDATE users
+        SET real_balance=real_balance+?,
+            total_spent=total_spent-?
+        WHERE id=?
+    """, (
+        row["price"],
+        row["price"],
+        row["user_id"]
+    ))
 
     conn.execute("""
         UPDATE service_orders
@@ -2023,9 +2376,8 @@ async def admin_reject_order(update, context, order_id):
 
     try:
         await update.callback_query.edit_message_text(
-            (
-                update.callback_query.message.text or ""
-            ) + "\n\n❌ <b>RAD ETILDI</b>",
+            (update.callback_query.message.text or "")
+            + "\n\n❌ <b>RAD ETILDI — PUL QAYTARILDI</b>",
             parse_mode="HTML"
         )
     except Exception:
@@ -2033,18 +2385,23 @@ async def admin_reject_order(update, context, order_id):
 
     await context.bot.send_message(
         row["user_id"],
-        f"❌ <b>BUYURTMANGIZ RAD ETILDI</b>\n\n"
-        f"🆔 Buyurtma: <code>#{order_id}</code>\n"
-        f"🛍 {row['item']}",
+        "❌ <b>BUYURTMANGIZ RAD ETILDI</b>\n\n"
+        f"🆔 #{order_id}\n"
+        f"💰 {float(row['price']):,.0f} so‘m balansingizga qaytarildi.",
         parse_mode="HTML"
     )
 
 
 # =========================================================
-# ADMIN WITHDRAW ACTIONS
+# ADMIN WITHDRAW APPROVE
 # =========================================================
 
-async def admin_approve_withdraw(update, context, withdrawal_id):
+async def admin_approve_withdraw(
+    update,
+    context,
+    withdrawal_id
+):
+
     conn = db()
 
     row = conn.execute("""
@@ -2054,6 +2411,7 @@ async def admin_approve_withdraw(update, context, withdrawal_id):
     """, (withdrawal_id,)).fetchone()
 
     if not row or row["status"] != "pending":
+
         conn.close()
 
         await update.callback_query.answer(
@@ -2061,38 +2419,6 @@ async def admin_approve_withdraw(update, context, withdrawal_id):
             show_alert=True
         )
         return
-
-    # Ichki balansdan ayiramiz.
-    # Haqiqiy to‘lovni admin qo‘lda amalga oshiradi.
-    user = conn.execute("""
-        SELECT money_balance
-        FROM users
-        WHERE id=?
-    """, (row["user_id"],)).fetchone()
-
-    balance = float(
-        user["money_balance"] or 0
-    ) if user else 0
-
-    amount = float(row["amount"] or 0)
-
-    if balance < amount:
-        conn.close()
-
-        await update.callback_query.answer(
-            "Balans yetarli emas.",
-            show_alert=True
-        )
-        return
-
-    conn.execute("""
-        UPDATE users
-        SET money_balance=money_balance-?
-        WHERE id=?
-    """, (
-        amount,
-        row["user_id"]
-    ))
 
     conn.execute("""
         UPDATE money_withdrawals
@@ -2109,9 +2435,8 @@ async def admin_approve_withdraw(update, context, withdrawal_id):
 
     try:
         await update.callback_query.edit_message_text(
-            (
-                update.callback_query.message.text or ""
-            ) + "\n\n✅ <b>TASDIQLANDI</b>",
+            (update.callback_query.message.text or "")
+            + "\n\n✅ <b>TASDIQLANDI</b>",
             parse_mode="HTML"
         )
     except Exception:
@@ -2119,14 +2444,23 @@ async def admin_approve_withdraw(update, context, withdrawal_id):
 
     await context.bot.send_message(
         row["user_id"],
-        "✅ <b>PUL YECHISH SO‘ROVI TASDIQLANDI</b>\n\n"
-        f"💰 Miqdor: <b>{amount:,.0f} so‘m</b>\n"
-        "Admin tomonidan ko‘rib chiqildi.",
+        "✅ <b>SO‘ROVINGIZ KO‘RIB CHIQILDI</b>\n\n"
+        f"💰 Miqdor: <b>{float(row['amount']):,.0f} so‘m</b>\n\n"
+        "⏳ To‘lov 24 soat ichida amalga oshiriladi.",
         parse_mode="HTML"
     )
 
 
-async def admin_reject_withdraw(update, context, withdrawal_id):
+# =========================================================
+# ADMIN WITHDRAW REJECT
+# =========================================================
+
+async def admin_reject_withdraw(
+    update,
+    context,
+    withdrawal_id
+):
+
     conn = db()
 
     row = conn.execute("""
@@ -2136,6 +2470,7 @@ async def admin_reject_withdraw(update, context, withdrawal_id):
     """, (withdrawal_id,)).fetchone()
 
     if not row or row["status"] != "pending":
+
         conn.close()
 
         await update.callback_query.answer(
@@ -2143,6 +2478,16 @@ async def admin_reject_withdraw(update, context, withdrawal_id):
             show_alert=True
         )
         return
+
+    # BONUSNI QAYTARAMIZ
+    conn.execute("""
+        UPDATE users
+        SET bonus_balance=bonus_balance+?
+        WHERE id=?
+    """, (
+        row["amount"],
+        row["user_id"]
+    ))
 
     conn.execute("""
         UPDATE money_withdrawals
@@ -2159,9 +2504,8 @@ async def admin_reject_withdraw(update, context, withdrawal_id):
 
     try:
         await update.callback_query.edit_message_text(
-            (
-                update.callback_query.message.text or ""
-            ) + "\n\n❌ <b>RAD ETILDI</b>",
+            (update.callback_query.message.text or "")
+            + "\n\n❌ <b>RAD ETILDI — BONUS QAYTARILDI</b>",
             parse_mode="HTML"
         )
     except Exception:
@@ -2169,7 +2513,8 @@ async def admin_reject_withdraw(update, context, withdrawal_id):
 
     await context.bot.send_message(
         row["user_id"],
-        "❌ <b>PUL YECHISH SO‘ROVI RAD ETILDI</b>",
+        "❌ <b>PUL YECHISH SO‘ROVI RAD ETILDI</b>\n\n"
+        f"🎁 {float(row['amount']):,.0f} so‘m bonus balansingizga qaytarildi.",
         parse_mode="HTML"
     )
 
@@ -2179,67 +2524,69 @@ async def admin_reject_withdraw(update, context, withdrawal_id):
 # =========================================================
 
 def get_statistics():
+
     conn = db()
 
-    total_users = conn.execute("""
-        SELECT total_users
-        FROM bot_stats
-        WHERE id=1
-    """).fetchone()
-
     total_users = int(
-        total_users["total_users"]
-    ) if total_users else 0
+        conn.execute("""
+            SELECT total_users
+            FROM bot_stats
+            WHERE id=1
+        """).fetchone()["total_users"]
+    )
 
-    active_users = conn.execute("""
+    today = (
+        datetime.now(timezone.utc)
+        - timedelta(days=1)
+    ).isoformat()
+
+    new_today = conn.execute("""
         SELECT COUNT(*)
         FROM users
-        WHERE last_seen IS NOT NULL
-    """).fetchone()[0]
+        WHERE last_seen >= ?
+    """, (today,)).fetchone()[0]
 
-    total_money = conn.execute("""
-        SELECT COALESCE(SUM(money_balance), 0)
+    total_refs = conn.execute("""
+        SELECT COALESCE(SUM(referrals),0)
         FROM users
     """).fetchone()[0]
 
-    total_stars = conn.execute("""
-        SELECT COALESCE(SUM(points), 0)
+    real_balance = conn.execute("""
+        SELECT COALESCE(SUM(real_balance),0)
         FROM users
     """).fetchone()[0]
 
-    orders_total = conn.execute("""
+    bonus_balance = conn.execute("""
+        SELECT COALESCE(SUM(bonus_balance),0)
+        FROM users
+    """).fetchone()[0]
+
+    stars = conn.execute("""
+        SELECT COALESCE(SUM(points),0)
+        FROM users
+    """).fetchone()[0]
+
+    deposited = conn.execute("""
+        SELECT COALESCE(SUM(amount),0)
+        FROM payment_requests
+        WHERE status='approved'
+    """).fetchone()[0]
+
+    spent = conn.execute("""
+        SELECT COALESCE(SUM(price),0)
+        FROM service_orders
+        WHERE status='completed'
+    """).fetchone()[0]
+
+    orders = conn.execute("""
         SELECT COUNT(*)
         FROM service_orders
     """).fetchone()[0]
 
-    orders_pending = conn.execute("""
+    pending_orders = conn.execute("""
         SELECT COUNT(*)
         FROM service_orders
         WHERE status='pending'
-    """).fetchone()[0]
-
-    orders_completed = conn.execute("""
-        SELECT COUNT(*)
-        FROM service_orders
-        WHERE status='completed'
-    """).fetchone()[0]
-
-    orders_rejected = conn.execute("""
-        SELECT COUNT(*)
-        FROM service_orders
-        WHERE status='rejected'
-    """).fetchone()[0]
-
-    spent_orders = conn.execute("""
-        SELECT COALESCE(SUM(price), 0)
-        FROM service_orders
-        WHERE status='completed'
-    """).fetchone()[0]
-
-    approved_withdraw = conn.execute("""
-        SELECT COALESCE(SUM(amount), 0)
-        FROM money_withdrawals
-        WHERE status='approved'
     """).fetchone()[0]
 
     pending_payments = conn.execute("""
@@ -2256,58 +2603,40 @@ def get_statistics():
 
     conn.close()
 
-    total_used = float(spent_orders or 0) + float(
-        approved_withdraw or 0
-    )
-
     return {
         "total_users": total_users,
-        "active_users": active_users,
-        "total_money": float(total_money or 0),
-        "total_stars": float(total_stars or 0),
-        "orders_total": int(orders_total),
-        "orders_pending": int(orders_pending),
-        "orders_completed": int(orders_completed),
-        "orders_rejected": int(orders_rejected),
-        "spent_orders": float(spent_orders or 0),
-        "approved_withdraw": float(approved_withdraw or 0),
-        "total_used": total_used,
+        "new_today": new_today,
+        "total_refs": int(total_refs),
+        "real_balance": float(real_balance),
+        "bonus_balance": float(bonus_balance),
+        "stars": float(stars),
+        "deposited": float(deposited),
+        "spent": float(spent),
+        "orders": int(orders),
+        "pending_orders": int(pending_orders),
         "pending_payments": int(pending_payments),
         "pending_withdrawals": int(pending_withdrawals),
     }
 
 
 async def admin_stats(update, context):
-    stats = get_statistics()
+
+    s = get_statistics()
 
     text = (
         "📊 <b>BOT STATISTIKASI</b>\n\n"
-        f"👥 Jami foydalanuvchilar: "
-        f"<b>{stats['total_users']}</b>\n"
-        f"🟢 Faol foydalanuvchilar: "
-        f"<b>{stats['active_users']}</b>\n\n"
-        f"💰 Botdagi virtual pul: "
-        f"<b>{stats['total_money']:,.0f} so‘m</b>\n"
-        f"⭐ Jami Stars balans: "
-        f"<b>{stats['total_stars']:,.2f}</b>\n\n"
-        f"🛍 Jami buyurtmalar: "
-        f"<b>{stats['orders_total']}</b>\n"
-        f"⏳ Pending: "
-        f"<b>{stats['orders_pending']}</b>\n"
-        f"✅ Bajarilgan: "
-        f"<b>{stats['orders_completed']}</b>\n"
-        f"❌ Rad etilgan: "
-        f"<b>{stats['orders_rejected']}</b>\n\n"
-        f"📦 Buyurtmalarda ishlatilgan summa: "
-        f"<b>{stats['spent_orders']:,.0f} so‘m</b>\n"
-        f"💸 Tasdiqlangan yechishlar: "
-        f"<b>{stats['approved_withdraw']:,.0f} so‘m</b>\n"
-        f"📉 Jami ishlatilgan: "
-        f"<b>{stats['total_used']:,.0f} so‘m</b>\n\n"
-        f"💳 Pending to‘lovlar: "
-        f"<b>{stats['pending_payments']}</b>\n"
-        f"💸 Pending yechishlar: "
-        f"<b>{stats['pending_withdrawals']}</b>"
+        f"👥 Jami obunachi: <b>{s['total_users']}</b>\n"
+        f"🆕 Oxirgi 24 soatda kelgan: <b>{s['new_today']}</b>\n"
+        f"🗣 Jami referallar: <b>{s['total_refs']}</b>\n\n"
+        f"⭐ Jami Stars: <b>{s['stars']:.2f}</b>\n\n"
+        f"💳 Kiritilgan pullar: <b>{s['deposited']:,.2f} so‘m</b>\n"
+        f"💰 Foydalanuvchilar balansida: <b>{s['real_balance']:,.2f} so‘m</b>\n"
+        f"🎁 Bonus balanslar: <b>{s['bonus_balance']:,.2f} so‘m</b>\n"
+        f"🛍 Jami sarflangan: <b>{s['spent']:,.2f} so‘m</b>\n\n"
+        f"🛍 Jami buyurtmalar: <b>{s['orders']}</b>\n"
+        f"⏳ Pending buyurtmalar: <b>{s['pending_orders']}</b>\n"
+        f"💳 Pending to‘lovlar: <b>{s['pending_payments']}</b>\n"
+        f"💸 Pending yechishlar: <b>{s['pending_withdrawals']}</b>"
     )
 
     await update.callback_query.edit_message_text(
@@ -2335,27 +2664,35 @@ async def admin_stats(update, context):
 # =========================================================
 
 async def admin_orders(update, context):
+
     conn = db()
 
     rows = conn.execute("""
         SELECT *
         FROM service_orders
         ORDER BY id DESC
-        LIMIT 10
+        LIMIT 15
     """).fetchall()
 
     conn.close()
 
     if not rows:
-        text = "🛍 <b>BUYURTMALAR</b>\n\nBuyurtmalar yo‘q."
+
+        text = (
+            "🛍 <b>BUYURTMALAR</b>\n\n"
+            "Buyurtma yo‘q."
+        )
+
     else:
-        text = "🛍 <b>SO‘NGGI 10 BUYURTMA</b>\n\n"
+
+        text = "🛍 <b>SO‘NGGI BUYURTMALAR</b>\n\n"
 
         for row in rows:
+
             text += (
-                f"🆔 <b>#{row['id']}</b> — "
-                f"{row['item']}\n"
-                f"💰 {float(row['price'] or 0):,.0f} so‘m\n"
+                f"🆔 #{row['id']}\n"
+                f"🛍 {row['item']}\n"
+                f"💰 {float(row['price']):,.0f} so‘m\n"
                 f"📌 {row['status']}\n\n"
             )
 
@@ -2378,6 +2715,7 @@ async def admin_orders(update, context):
 # =========================================================
 
 async def admin_payments(update, context):
+
     conn = db()
 
     rows = conn.execute("""
@@ -2385,24 +2723,28 @@ async def admin_payments(update, context):
         FROM payment_requests
         WHERE status='pending'
         ORDER BY id DESC
-        LIMIT 10
+        LIMIT 15
     """).fetchall()
 
     conn.close()
 
     if not rows:
+
         text = (
             "💳 <b>PENDING TO‘LOVLAR</b>\n\n"
-            "Hozir pending chek yo‘q."
+            "Pending chek yo‘q."
         )
+
     else:
+
         text = "💳 <b>PENDING TO‘LOVLAR</b>\n\n"
 
         for row in rows:
+
             text += (
                 f"🆔 #{row['id']}\n"
-                f"👤 User: <code>{row['user_id']}</code>\n"
-                f"📌 {row['status']}\n\n"
+                f"👤 <code>{row['user_id']}</code>\n"
+                f"💵 {float(row['amount']):,.0f} so‘m\n\n"
             )
 
     await update.callback_query.edit_message_text(
@@ -2424,6 +2766,7 @@ async def admin_payments(update, context):
 # =========================================================
 
 async def admin_withdrawals(update, context):
+
     conn = db()
 
     rows = conn.execute("""
@@ -2431,24 +2774,28 @@ async def admin_withdrawals(update, context):
         FROM money_withdrawals
         WHERE status='pending'
         ORDER BY id DESC
-        LIMIT 10
+        LIMIT 15
     """).fetchall()
 
     conn.close()
 
     if not rows:
+
         text = (
             "💸 <b>PENDING YECHISHLAR</b>\n\n"
-            "Hozir pending so‘rov yo‘q."
+            "Pending so‘rov yo‘q."
         )
+
     else:
+
         text = "💸 <b>PENDING YECHISHLAR</b>\n\n"
 
         for row in rows:
+
             text += (
                 f"🆔 #{row['id']}\n"
-                f"👤 User: <code>{row['user_id']}</code>\n"
-                f"💰 {float(row['amount'] or 0):,.0f} so‘m\n\n"
+                f"👤 <code>{row['user_id']}</code>\n"
+                f"💰 {float(row['amount']):,.0f} so‘m\n\n"
             )
 
     await update.callback_query.edit_message_text(
@@ -2470,20 +2817,25 @@ async def admin_withdrawals(update, context):
 # =========================================================
 
 async def admin_command(update, context):
+
     if update.effective_user.id != ADMIN_ID:
+
         await update.message.reply_text(
             "❌ Ruxsat yo‘q."
         )
         return
 
-    stats = get_statistics()
+    s = get_statistics()
 
     await update.message.reply_text(
         "👑 <b>ADMIN PANEL</b>\n\n"
-        f"👥 Odamlar: <b>{stats['total_users']}</b>\n"
-        f"💰 Botdagi pul: <b>{stats['total_money']:,.0f} so‘m</b>\n"
-        f"🛍 Buyurtmalar: <b>{stats['orders_total']}</b>\n"
-        f"⏳ Pending: <b>{stats['orders_pending']}</b>",
+        f"👥 Obunachilar: <b>{s['total_users']}</b>\n"
+        f"🆕 Bugun/24 soat: <b>{s['new_today']}</b>\n"
+        f"🗣 Referallar: <b>{s['total_refs']}</b>\n"
+        f"⭐ Stars: <b>{s['stars']:.2f}</b>\n"
+        f"💳 Kiritilgan pul: <b>{s['deposited']:,.0f} so‘m</b>\n"
+        f"💰 Balanslar: <b>{s['real_balance']:,.0f} so‘m</b>\n\n"
+        "Kerakli bo‘limni tanlang.",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [
@@ -2494,14 +2846,14 @@ async def admin_command(update, context):
             ],
             [
                 InlineKeyboardButton(
-                    "🛍 BUYURTMALAR",
-                    callback_data="admin_orders"
+                    "💳 TO‘LOVLAR",
+                    callback_data="admin_payments"
                 )
             ],
             [
                 InlineKeyboardButton(
-                    "💳 TO‘LOVLAR",
-                    callback_data="admin_payments"
+                    "🛍 BUYURTMALAR",
+                    callback_data="admin_orders"
                 )
             ],
             [
@@ -2509,9 +2861,111 @@ async def admin_command(update, context):
                     "💸 PUL YECHISHLAR",
                     callback_data="admin_withdrawals"
                 )
+            ],
+            [
+                InlineKeyboardButton(
+                    "📢 REKLAMA YUBORISH",
+                    callback_data="admin_broadcast"
+                )
             ]
         ])
     )
+
+
+# =========================================================
+# BROADCAST
+# =========================================================
+
+async def process_broadcast(update, context):
+
+    if update.effective_user.id != ADMIN_ID:
+        return False
+
+    if not context.user_data.get("broadcast"):
+        return False
+
+    if not update.message or not update.message.text:
+        return True
+
+    message_text = update.message.text.strip()
+
+    context.user_data.pop(
+        "broadcast",
+        None
+    )
+
+    conn = db()
+
+    users = conn.execute("""
+        SELECT id
+        FROM users
+        WHERE blocked=0
+    """).fetchall()
+
+    conn.close()
+
+    sent = 0
+    failed = 0
+
+    await update.message.reply_text(
+        "📢 Reklama yuborish boshlandi..."
+    )
+
+    for row in users:
+
+        try:
+
+            await context.bot.send_message(
+                row["id"],
+                message_text
+            )
+
+            sent += 1
+
+            await asyncio.sleep(0.05)
+
+        except RetryAfter as e:
+
+            await asyncio.sleep(
+                float(e.retry_after)
+            )
+
+            try:
+                await context.bot.send_message(
+                    row["id"],
+                    message_text
+                )
+                sent += 1
+            except Exception:
+                failed += 1
+
+        except Forbidden:
+
+            failed += 1
+
+            conn = db()
+
+            conn.execute("""
+                UPDATE users
+                SET blocked=1
+                WHERE id=?
+            """, (row["id"],))
+
+            conn.commit()
+            conn.close()
+
+        except Exception:
+
+            failed += 1
+
+    await update.message.reply_text(
+        "📢 <b>REKLAMA YAKUNLANDI</b>\n\n"
+        f"✅ Yuborildi: <b>{sent}</b>\n"
+        f"❌ Yuborilmadi: <b>{failed}</b>",
+        parse_mode="HTML"
+    )
+
+    return True
 
 
 # =========================================================
@@ -2519,57 +2973,222 @@ async def admin_command(update, context):
 # =========================================================
 
 async def text_handler(update, context):
+
     if not update.effective_user:
         return
 
     user_id = update.effective_user.id
 
-    # =====================================================
+    # -----------------------------------------------------
+    # ADMIN BALANCE CREDIT
+    # -----------------------------------------------------
+
+    if (
+        user_id == ADMIN_ID
+        and context.user_data.get("credit_payment_id")
+        and update.message
+        and update.message.text
+    ):
+
+        try:
+
+            amount = float(
+                update.message.text
+                .replace(",", "")
+                .replace(" ", "")
+            )
+
+        except Exception:
+
+            await update.message.reply_text(
+                "❌ Faqat raqam kiriting."
+            )
+            return
+
+        if amount <= 0:
+
+            await update.message.reply_text(
+                "❌ Summa 0 dan katta bo‘lishi kerak."
+            )
+            return
+
+        request_id = context.user_data.pop(
+            "credit_payment_id"
+        )
+
+        conn = db()
+
+        row = conn.execute("""
+            SELECT *
+            FROM payment_requests
+            WHERE id=?
+        """, (request_id,)).fetchone()
+
+        if not row or row["status"] != "pending":
+
+            conn.close()
+
+            await update.message.reply_text(
+                "❌ To‘lov topilmadi yoki allaqachon ko‘rilgan."
+            )
+            return
+
+        conn.execute("""
+            UPDATE users
+            SET real_balance=real_balance+?,
+                total_deposited=total_deposited+?
+            WHERE id=?
+        """, (
+            amount,
+            amount,
+            row["user_id"]
+        ))
+
+        conn.execute("""
+            UPDATE payment_requests
+            SET amount=?,
+                status='approved',
+                processed_at=?
+            WHERE id=?
+        """, (
+            amount,
+            now_iso(),
+            request_id
+        ))
+
+        conn.commit()
+        conn.close()
+
+        await update.message.reply_text(
+            "✅ <b>BALANS QO‘SHILDI</b>\n\n"
+            f"👤 User ID: <code>{row['user_id']}</code>\n"
+            f"💰 Qo‘shildi: <b>{amount:,.0f} so‘m</b>",
+            parse_mode="HTML"
+        )
+
+        await context.bot.send_message(
+            row["user_id"],
+            "✅ <b>TO‘LOV TASDIQLANDI</b>\n\n"
+            f"💰 Balansingizga <b>{amount:,.0f} so‘m</b> qo‘shildi.\n\n"
+            "Endi balansingizdan xizmat yoki mahsulot sotib olishingiz mumkin.",
+            parse_mode="HTML"
+        )
+
+        return
+
+    # -----------------------------------------------------
+    # BROADCAST
+    # -----------------------------------------------------
+
+    if await process_broadcast(
+        update,
+        context
+    ):
+        return
+
+    # -----------------------------------------------------
     # RECEIPT
-    # =====================================================
+    # -----------------------------------------------------
 
     if (
         update.message
         and update.message.photo
         and context.user_data.get("waiting_receipt")
     ):
+
         await receive_receipt(
             update,
             context
         )
         return
 
-    # =====================================================
-    # PROMO LINK
-    # =====================================================
+    # -----------------------------------------------------
+    # PAYMENT AMOUNT
+    # -----------------------------------------------------
 
-    if context.user_data.get("waiting_promo_link"):
-        if await process_promo_link(
+    if context.user_data.get(
+        "waiting_payment_amount"
+    ):
+
+        if not update.message or not update.message.text:
+            return
+
+        try:
+
+            amount = float(
+                update.message.text
+                .replace(",", "")
+                .replace(" ", "")
+            )
+
+        except Exception:
+
+            await update.message.reply_text(
+                "❌ Faqat raqam kiriting.\n\n"
+                "Masalan: 4799"
+            )
+            return
+
+        if amount < MIN_TOPUP:
+
+            await update.message.reply_text(
+                f"❌ Minimal to‘lov: {MIN_TOPUP:,} so‘m."
+            )
+            return
+
+        context.user_data.pop(
+            "waiting_payment_amount",
+            None
+        )
+
+        context.user_data["payment_amount"] = amount
+        context.user_data["waiting_receipt"] = True
+
+        await update.message.reply_text(
+            "📝 <b>To‘lov chekini rasmga olib yuboring</b>\n\n"
+            f"💵 Summa: <b>{amount:,.0f} so‘m</b>",
+            parse_mode="HTML"
+        )
+        return
+
+    # -----------------------------------------------------
+    # NAKRUTKA LINK
+    # -----------------------------------------------------
+
+    if context.user_data.get(
+        "waiting_nak_link"
+    ):
+
+        if await process_nak_link(
             update,
             context
         ):
             return
 
-    # =====================================================
-    # MONEY WITHDRAW
-    # =====================================================
+    # -----------------------------------------------------
+    # WITHDRAW
+    # -----------------------------------------------------
 
     if (
         context.user_data.get("money_withdraw")
         and update.message
         and update.message.text
     ):
+
         await process_money_withdraw(
             update,
             context
         )
         return
 
-    # =====================================================
+    # -----------------------------------------------------
     # OTHER USER
-    # =====================================================
+    # -----------------------------------------------------
 
-    if context.user_data.get("waiting_target"):
+    if context.user_data.get(
+        "waiting_target"
+    ):
+
         if not update.message or not update.message.text:
             return
 
@@ -2590,9 +3209,35 @@ async def text_handler(update, context):
         if not order:
             return
 
-        user_id = update.effective_user.id
+        price = float(order["price"])
+        balance = real_balance(user_id)
+
+        if balance < price:
+
+            context.user_data.pop(
+                "pending_order",
+                None
+            )
+
+            await update.message.reply_text(
+                f"❌ Balansingiz yetarli emas.\n\n"
+                f"Kerak: {price:,.0f} so‘m\n"
+                f"Balans: {balance:,.0f} so‘m"
+            )
+            return
 
         conn = db()
+
+        conn.execute("""
+            UPDATE users
+            SET real_balance=real_balance-?,
+                total_spent=total_spent+?
+            WHERE id=?
+        """, (
+            price,
+            price,
+            user_id
+        ))
 
         cur = conn.execute("""
             INSERT INTO service_orders (
@@ -2610,7 +3255,7 @@ async def text_handler(update, context):
             user_id,
             order["category"],
             order["item"],
-            order["price"],
+            price,
             target,
             now_iso()
         ))
@@ -2628,7 +3273,7 @@ async def text_handler(update, context):
         await update.message.reply_text(
             "✅ <b>BUYURTMA YUBORILDI</b>\n\n"
             f"🛍 {order['item']}\n"
-            f"💰 {order['price']:,} so‘m\n"
+            f"💰 {price:,.0f} so‘m\n"
             f"👤 {target}\n"
             f"🆔 #{order_id}",
             parse_mode="HTML"
@@ -2638,52 +3283,88 @@ async def text_handler(update, context):
             context,
             order_id
         )
-
         return
 
-    # =====================================================
+    # -----------------------------------------------------
     # SPONSOR
-    # =====================================================
+    # -----------------------------------------------------
 
     if not await check_sponsor(
         context.bot,
         user_id
     ):
+
         await show_sponsor(update)
         return
+
+    # -----------------------------------------------------
+    # TEXT
+    # -----------------------------------------------------
 
     if not update.message or not update.message.text:
         return
 
     text = update.message.text.strip()
 
-    # =====================================================
-    # MAIN BUTTONS
-    # =====================================================
+    # -----------------------------------------------------
+    # MENU
+    # -----------------------------------------------------
 
     if text == "💰 PUL ISHLASH":
-        await money_work(update, context)
+
+        await money_work(
+            update,
+            context
+        )
 
     elif text == "⭐ STARS ISHLASH":
-        await stars_work(update, context)
+
+        await stars_work(
+            update,
+            context
+        )
 
     elif text == "💎 PREMIUM ISHLASH":
-        await premium_work(update, context)
+
+        await premium_work(
+            update,
+            context
+        )
 
     elif text == "📱 NOMER OLISH":
-        await numbers_menu(update, context)
 
-    elif text == "📈 PROMO XIZMATLARI":
-        await promo_menu(update, context)
+        await numbers_menu(
+            update,
+            context
+        )
+
+    elif text == "📈 NAKRUTKA":
+
+        await nakrutka_menu(
+            update,
+            context
+        )
 
     elif text == "🛍 DO‘KON":
-        await shop(update, context)
+
+        await shop(
+            update,
+            context
+        )
 
     elif text == "💳 HISOB TO‘LDIRISH":
-        await payment_menu(update, context)
+
+        await payment_menu(
+            update,
+            context
+        )
 
     elif text == "👤 MENING HISOBIM":
-        await my_account(update, context)
+
+        await my_account(
+            update,
+            context
+        )
 
 
 # =========================================================
@@ -2691,6 +3372,7 @@ async def text_handler(update, context):
 # =========================================================
 
 async def error_handler(update, context):
+
     logger.error(
         "Exception:",
         exc_info=context.error
@@ -2702,7 +3384,9 @@ async def error_handler(update, context):
 # =========================================================
 
 def main():
+
     if not BOT_TOKEN:
+
         raise RuntimeError(
             "BOT_TOKEN GitHub Secrets ichida topilmadi."
         )
