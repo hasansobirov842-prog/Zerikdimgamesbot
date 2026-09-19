@@ -31,7 +31,8 @@ try:
     ADMIN_ID = int(os.getenv("ADMIN_ID", "8679536810"))
 except Exception:
     ADMIN_ID = 8679536810
-
+PAYMENT_CARD = os.getenv("PAYMENT_CARD", "")
+PAYMENT_OWNER = os.getenv("PAYMENT_OWNER", "RAKHMONOVA/O")
 DB_FILE = "zerikdim.db"
 
 REFERRAL_STARS = 9.0
