@@ -6,7 +6,7 @@ SOZLAMALAR
 BOT_TOKEN = os.getenv("BOT_TOKEN", "").strip()
 try: ADMIN_ID = int(os.getenv("ADMIN_ID", "8679536810")) except Exception: ADMIN_ID = 8679536810
 DB_FILE = "zerikdim.db"
-KARTA OCHIQ KO'RINADI
+"KARTA OCHIQ KO'RINADI"
 PAYMENT_CARD = "5614681008971867" PAYMENT_OWNER = "RAKHMONOVA/O"
 SPONSOR_CHANNEL = "@premyumstarstekin" SPONSOR_URL = "https://t.me/premyumstarstekin"
 REFERRAL_STARS = 9.0 REFERRAL_BONUS = 500.0
