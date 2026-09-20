@@ -906,7 +906,7 @@ await send_order_to_admin(
 
 return True
 =========================================================
-DO‘KON
+#dokon
 =========================================================
 async def shop(update, context):
 await update.message.reply_text(
