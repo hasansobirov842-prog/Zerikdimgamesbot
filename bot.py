@@ -869,47 +869,40 @@ async def referral(update, context):
 
     if not user:
         return
+share_url = (
+    "https://t.me/share/url?url="
+    + link
+    + "&text=TEKIN%20STARS%20BOT%20orqali%20bonus%20oling!"
+)
 
-    me = await context.bot.get_me()
-
-    link = f"https://t.me/{me.username}?start={user_id}"
-
-    refs = int(user["referrals"] or 0)
-
-    share_url = (
-        "https://t.me/share/url"
-        "?url=" + link
-        "&text=TEKIN%20STARS%20BOT%20orqali%20bonus%20oling!"
-    )
-
-    await update.effective_message.reply_text(
-        "👥 <b>REFERAL TIZIMI</b>\n\n"
-        f"👥 Referallar: <b>{refs}</b>\n\n"
-        f"⭐ 1 odam = <b>+{REFERRAL_STARS:g} ⭐</b>\n"
-        f"💰 1 odam = <b>+{REFERRAL_BONUS:,.0f} so‘m</b>\n\n"
-        "🎁 25 referal → 1 oy Premium\n"
-        "🎁 70 referal → 3 oy Premium\n\n"
-        "🔗 Sizning havolangiz:\n"
-        f"<code>{link}</code>",
-        parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([
+await update.effective_message.reply_text(
+    "👥 <b>REFERAL TIZIMI</b>\n\n"
+    f"👥 Referallar: <b>{refs}</b>\n\n"
+    f"⭐ 1 odam = <b>+{REFERRAL_STARS:g} ⭐</b>\n"
+    f"💰 1 odam = <b>+{REFERRAL_BONUS:,.0f} so‘m</b>\n\n"
+    "🎁 25 referal → 1 oy Premium\n"
+    "🎁 70 referal → 3 oy Premium\n\n"
+    "🔗 Sizning havolangiz:\n"
+    f"<code>{link}</code>",
+    parse_mode="HTML",
+    reply_markup=InlineKeyboardMarkup(
+        [
             [
                 InlineKeyboardButton(
                     "📤 ULASHISH",
                     url=share_url
                 )
             ]
-        ])
+        ]
     )
+)
+    me = await context.bot.get_me()
 
+    link = f"https://t.me/{me.username}?start={user_id}"
 
-# =========================================================
-# NOMER
-# =========================================================
+    refs = int(user["referrals"] or 0)
 
-async def numbers_menu(update, context):
-    buttons = []
-
+    
     for country, price in NUMBERS.items():
         buttons.append([
             InlineKeyboardButton(
