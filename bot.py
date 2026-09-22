@@ -9,7 +9,6 @@ from telegram import (
     InlineKeyboardMarkup,
     ReplyKeyboardMarkup,
 )
-from telegram.constants import ChatMemberStatus
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -28,35 +27,24 @@ ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 
 DB_FILE = "zerikdim.db"
 
-# 1 Stars = 215 so'm
-STARS_RATE = 215
-
-# Referal
 REF_MONEY = 1000
 REF_STARS = 5
 
-# Premium
-PREMIUM_REFERRALS = 40
-
-# Pul chiqarish
 MIN_WITHDRAW = 30000
 
-# Nomer
-NUMBER_PRICE = 25000
+STARS_RATE = 215
 
-# Telegram nakrutka
-NAKRUTKA_PRICE = 7000
-NAKRUTKA_PROFIT = 1000
+TAJIK_NUMBER_PRICE = 25000
+RUSSIAN_NUMBER_PRICE = 25000
 
-# Majburiy homiy
-SPONSOR = "@premyumstarstekin"
+PREMIUM_REFERRALS = 40
+
+PAYMENT_CARD = "5614681008971867"
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO,
+    level=logging.INFO
 )
-
-log = logging.getLogger("TEKIN_STARS")
 
 # =========================================================
 # DATABASE
@@ -71,75 +59,54 @@ def init_db():
     cur = con.cursor()
 
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY,
-            username TEXT,
-            balance REAL DEFAULT 0,
-            stars INTEGER DEFAULT 0,
-            referrals INTEGER DEFAULT 0,
-            referred_by INTEGER,
-            premium_referrals INTEGER DEFAULT 0,
-            created_at TEXT
-        )
+    CREATE TABLE IF NOT EXISTS users (
+        id INTEGER PRIMARY KEY,
+        username TEXT,
+        balance REAL DEFAULT 0,
+        stars REAL DEFAULT 0,
+        referrals INTEGER DEFAULT 0,
+        referred_by INTEGER,
+        premium_claimed INTEGER DEFAULT 0,
+        created_at TEXT
+    )
     """)
 
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS payments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            photo_id TEXT,
-            status TEXT DEFAULT 'pending',
-            amount REAL DEFAULT 0,
-            created_at TEXT
-        )
+    CREATE TABLE IF NOT EXISTS payments (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        amount REAL,
+        status TEXT DEFAULT 'pending',
+        receipt_file TEXT,
+        created_at TEXT
+    )
     """)
 
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS numbers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            country TEXT,
-            number TEXT,
-            sold INTEGER DEFAULT 0
-        )
+    CREATE TABLE IF NOT EXISTS withdrawals (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        amount REAL,
+        card TEXT,
+        status TEXT DEFAULT 'pending',
+        created_at TEXT
+    )
     """)
 
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS orders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            type TEXT,
-            amount REAL DEFAULT 0,
-            details TEXT,
-            status TEXT DEFAULT 'pending',
-            created_at TEXT
-        )
-    """)
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS withdrawals (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            amount REAL,
-            card TEXT,
-            status TEXT DEFAULT 'pending',
-            created_at TEXT
-        )
-    """)
-
-    cur.execute("""
-        CREATE TABLE IF NOT EXISTS sponsors (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            channel TEXT UNIQUE
-        )
+    CREATE TABLE IF NOT EXISTS number_orders (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        country TEXT,
+        amount REAL,
+        status TEXT DEFAULT 'pending',
+        created_at TEXT
+    )
     """)
 
     con.commit()
     con.close()
 
-
-# =========================================================
-# USER
-# =========================================================
 
 def get_user(user_id):
     con = db()
@@ -150,156 +117,110 @@ def get_user(user_id):
     return row
 
 
-def create_user(user_id, username, referred_by=None):
+def add_user(user_id, username, referrer=None):
+    if get_user(user_id):
+        return
+
     con = db()
     cur = con.cursor()
 
-    cur.execute(
-        "SELECT id FROM users WHERE id=?",
-        (user_id,)
-    )
+    cur.execute("""
+    INSERT INTO users
+    (id, username, balance, stars, referrals, referred_by, premium_claimed, created_at)
+    VALUES (?, ?, 0, 0, 0, ?, 0, ?)
+    """, (
+        user_id,
+        username or "",
+        referrer,
+        datetime.now().isoformat()
+    ))
 
-    if not cur.fetchone():
+    if referrer and referrer != user_id:
         cur.execute("""
-            INSERT INTO users
-            (id, username, balance, stars, referrals,
-             referred_by, premium_referrals, created_at)
-            VALUES (?, ?, 0, 0, 0, ?, 0, ?)
-        """, (
-            user_id,
-            username or "",
-            referred_by,
-            datetime.now().isoformat()
-        ))
-
-        if referred_by and referred_by != user_id:
-            cur.execute("""
-                UPDATE users
-                SET referrals = referrals + 1,
-                    balance = balance + ?,
-                    stars = stars + ?
-                WHERE id=?
-            """, (
-                REF_MONEY,
-                REF_STARS,
-                referred_by
-            ))
-
-    else:
-        cur.execute(
-            "UPDATE users SET username=? WHERE id=?",
-            (username or "", user_id)
-        )
+        UPDATE users
+        SET balance = balance + ?,
+            stars = stars + ?,
+            referrals = referrals + 1
+        WHERE id=?
+        """, (REF_MONEY, REF_STARS, referrer))
 
     con.commit()
     con.close()
 
 
-def add_balance(user_id, amount):
+def change_balance(user_id, amount):
     con = db()
-    cur = con.cursor()
-
-    cur.execute(
+    con.execute(
         "UPDATE users SET balance=balance+? WHERE id=?",
         (amount, user_id)
     )
-
     con.commit()
     con.close()
 
 
-def add_stars(user_id, amount):
+def change_stars(user_id, amount):
     con = db()
-    cur = con.cursor()
-
-    cur.execute(
+    con.execute(
         "UPDATE users SET stars=stars+? WHERE id=?",
         (amount, user_id)
     )
-
     con.commit()
     con.close()
 
 
-def remove_balance(user_id, amount):
+def set_balance(user_id, amount):
+    con = db()
+    con.execute(
+        "UPDATE users SET balance=? WHERE id=?",
+        (amount, user_id)
+    )
+    con.commit()
+    con.close()
+
+
+def get_stats(user_id):
     con = db()
     cur = con.cursor()
 
-    cur.execute(
-        "SELECT balance FROM users WHERE id=?",
-        (user_id,)
-    )
+    cur.execute("""
+    SELECT balance, stars, referrals, premium_claimed
+    FROM users WHERE id=?
+    """, (user_id,))
 
     row = cur.fetchone()
-
-    if not row or row[0] < amount:
-        con.close()
-        return False
-
-    cur.execute(
-        "UPDATE users SET balance=balance-? WHERE id=?",
-        (amount, user_id)
-    )
-
-    con.commit()
     con.close()
-
-    return True
-
-
-# =========================================================
-# HOMIY
-# =========================================================
-
-async def check_sponsor(user_id, context):
-    try:
-        member = await context.bot.get_chat_member(
-            SPONSOR,
-            user_id
-        )
-
-        return member.status in (
-            ChatMemberStatus.MEMBER,
-            ChatMemberStatus.ADMINISTRATOR,
-            ChatMemberStatus.OWNER,
-        )
-
-    except Exception:
-        return False
-
-
-def sponsor_keyboard():
-    return InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "📢 Homiy kanal",
-                url="https://t.me/premyumstarstekin"
-            )
-        ],
-        [
-            InlineKeyboardButton(
-                "✅ Tekshirish",
-                callback_data="check_sponsor"
-            )
-        ]
-    ])
+    return row
 
 
 # =========================================================
-# MENU
+# KLAVIATURA
 # =========================================================
 
-def main_menu():
+def main_keyboard():
     return ReplyKeyboardMarkup(
         [
             ["📱 Nomer olish", "⭐ Stars olish"],
             ["💎 Premium olish", "💰 Pul ishlash"],
-            ["💳 Balans", "💸 Pul yechish"],
-            ["📈 Telegram nakrutka", "📋 Buyurtmalarim"],
-            ["👤 Profil", "ℹ️ Yordam"],
+            ["💳 Hisobim", "💸 Pul chiqarish"],
+            ["📋 Buyurtmalarim", "ℹ️ Yordam"],
         ],
         resize_keyboard=True
     )
+
+
+def admin_keyboard():
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("👥 Foydalanuvchilar", callback_data="admin_users"),
+        ],
+        [
+            InlineKeyboardButton("💰 To‘lovlar", callback_data="admin_payments"),
+            InlineKeyboardButton("📱 Nomer buyurtmalari", callback_data="admin_numbers"),
+        ],
+        [
+            InlineKeyboardButton("💸 Pul chiqarish", callback_data="admin_withdraw"),
+        ],
+    ])
 
 
 # =========================================================
@@ -307,244 +228,132 @@ def main_menu():
 # =========================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     user = update.effective_user
 
-    referred_by = None
+    referrer = None
 
     if context.args:
         try:
-            referred_by = int(context.args[0])
+            referrer = int(context.args[0])
         except:
-            pass
+            referrer = None
 
-    create_user(
+    add_user(
         user.id,
         user.username,
-        referred_by
+        referrer
     )
 
-    if not await check_sponsor(user.id, context):
-        await update.message.reply_text(
-            "🔐 Botdan foydalanish uchun avval homiy kanalga obuna bo‘ling.",
-            reply_markup=sponsor_keyboard()
-        )
-        return
+    text = (
+        "🔥 <b>ARZON BOT</b>\n\n"
+        "Kerakli bo‘limni tanlang 👇\n\n"
+        "📱 Nomer olish\n"
+        "⭐ Telegram Stars olish\n"
+        "💎 Premium olish\n"
+        "💰 Referal orqali pul ishlash"
+    )
 
     await update.message.reply_text(
-        "🔥 TEKIN STARS BOT ga xush kelibsiz!\n\n"
-        "Kerakli bo‘limni tanlang 👇",
-        reply_markup=main_menu()
+        text,
+        parse_mode="HTML",
+        reply_markup=main_keyboard()
     )
 
 
 # =========================================================
-# SPONSOR TEKSHIRISH
+# HISOBIM
 # =========================================================
 
-async def check_sponsor_callback(update, context):
-    query = update.callback_query
-    await query.answer()
+async def account(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    if await check_sponsor(query.from_user.id, context):
-        await query.message.edit_text(
-            "✅ Obuna tasdiqlandi!\n\n"
-            "Endi botdan foydalanishingiz mumkin."
-        )
-
-        await query.message.reply_text(
-            "🔥 Asosiy menyu:",
-            reply_markup=main_menu()
-        )
-    else:
-        await query.answer(
-            "❌ Avval kanalga obuna bo‘ling!",
-            show_alert=True
-        )
-
-
-# =========================================================
-# BALANS
-# =========================================================
-
-async def balance(update, context):
-    user = get_user(update.effective_user.id)
-
-    if not user:
-        return
-
-    await update.message.reply_text(
-        f"💳 BALANS\n\n"
-        f"💰 Pul: {user[2]:,.0f} so‘m\n"
-        f"⭐ Stars: {user[3]}\n"
-        f"👥 Referallar: {user[4]} ta"
-    )
-
-
-# =========================================================
-# PROFIL
-# =========================================================
-
-async def profile(update, context):
-    user = get_user(update.effective_user.id)
-
-    await update.message.reply_text(
-        "👤 PROFIL\n\n"
-        f"🆔 ID: {user[0]}\n"
-        f"👤 Username: @{user[1] if user[1] else 'yo‘q'}\n"
-        f"💰 Balans: {user[2]:,.0f} so‘m\n"
-        f"⭐ Stars: {user[3]}\n"
-        f"👥 Referallar: {user[4]} ta"
-    )
-
-
-# =========================================================
-# PUL ISHLASH
-# =========================================================
-
-async def earn(update, context):
     user_id = update.effective_user.id
+    row = get_stats(user_id)
 
-    me = await context.bot.get_me()
+    if not row:
+        add_user(
+            user_id,
+            update.effective_user.username
+        )
+        row = get_stats(user_id)
 
-    link = f"https://t.me/{me.username}?start={user_id}"
+    balance, stars, refs, premium = row
 
     await update.message.reply_text(
-        "💰 PUL ISHLASH\n\n"
-        "Har bir taklif qilgan odamingiz uchun:\n\n"
-        "💵 +1 000 so‘m\n"
-        "⭐ +5 Stars\n\n"
-        f"👥 Hozirgi referallar: "
-        f"{get_user(user_id)[4]} ta\n\n"
-        "🔗 Sizning referal linkingiz:\n"
-        f"{link}\n\n"
-        "💎 40 ta referal yig‘sangiz — 1 oylik Premium olishingiz mumkin."
+        f"💳 <b>Hisobingiz</b>\n\n"
+        f"💰 Balans: <b>{balance:,.0f} so‘m</b>\n"
+        f"⭐ Stars: <b>{stars:,.0f}</b>\n"
+        f"👥 Referallar: <b>{refs} ta</b>",
+        parse_mode="HTML"
     )
 
 
 # =========================================================
-# PREMIUM
+# NOMER OLISH
 # =========================================================
 
-async def premium(update, context):
-    user = get_user(update.effective_user.id)
-
-    needed = PREMIUM_REFERRALS - user[4]
-
-    if needed <= 0:
-        await update.message.reply_text(
-            "🎉 Tabriklaymiz!\n\n"
-            "Siz 40 ta referalga yetdingiz.\n"
-            "💎 1 oylik Telegram Premium olish uchun "
-            "admin bilan bog‘laning."
-        )
-    else:
-        await update.message.reply_text(
-            "💎 TELEGRAM PREMIUM\n\n"
-            "🎁 1 OYLIK PREMIUM\n\n"
-            f"👥 Kerak: 40 referal\n"
-            f"✅ Sizda: {user[4]} ta\n"
-            f"⏳ Qoldi: {needed} ta"
-        )
-
-
-# =========================================================
-# STARS
-# =========================================================
-
-async def stars_menu(update, context):
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("⭐ 50", callback_data="stars_50"),
-            InlineKeyboardButton("⭐ 100", callback_data="stars_100"),
-        ],
-        [
-            InlineKeyboardButton("⭐ 200", callback_data="stars_200"),
-            InlineKeyboardButton("⭐ 500", callback_data="stars_500"),
-        ],
-        [
-            InlineKeyboardButton("⭐ 1000", callback_data="stars_1000"),
-        ],
-        [
-            InlineKeyboardButton(
-                "✍️ Boshqa miqdor",
-                callback_data="stars_custom"
-            )
-        ]
-    ])
+async def numbers(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
-        "⭐ STARS OLISH\n\n"
-        "Kurs: 1 Stars = 215 so‘m\n\n"
-        "Kerakli miqdorni tanlang:",
-        reply_markup=keyboard
-    )
-
-
-async def stars_callback(update, context):
-    query = update.callback_query
-    await query.answer()
-
-    data = query.data
-
-    if data == "stars_custom":
-        context.user_data["waiting_stars"] = True
-
-        await query.message.reply_text(
-            "✍️ Stars miqdorini yozing.\n\n"
-            "Masalan: 350"
-        )
-        return
-
-    amount = int(data.split("_")[1])
-    price = amount * STARS_RATE
-
-    context.user_data["star_order"] = amount
-
-    await query.message.reply_text(
-        f"⭐ {amount} Stars\n\n"
-        f"💰 Narxi: {price:,} so‘m\n\n"
-        "💳 Balansdan to‘lash uchun quyidagi tugmani bosing.",
+        "📱 <b>NOMER OLISH</b>\n\n"
+        "🇹🇯 Tojikiston — <b>25 000 so‘m</b>\n"
+        "🇷🇺 Rossiya — <b>25 000 so‘m</b>\n\n"
+        "Kerakli davlatni tanlang:",
+        parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [
                 InlineKeyboardButton(
-                    "💳 Sotib olish",
-                    callback_data=f"buy_stars_{amount}"
+                    "🇹🇯 Tojikiston — 25 000",
+                    callback_data="number_tajik"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    "🇷🇺 Rossiya — 25 000",
+                    callback_data="number_russia"
                 )
             ]
         ])
     )
 
 
-async def buy_stars(update, context):
+async def number_order(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     query = update.callback_query
     await query.answer()
 
-    amount = int(query.data.split("_")[2])
-    price = amount * STARS_RATE
-
     user_id = query.from_user.id
 
-    if not remove_balance(user_id, price):
+    if query.data == "number_tajik":
+        country = "🇹🇯 Tojikiston"
+        price = TAJIK_NUMBER_PRICE
+    else:
+        country = "🇷🇺 Rossiya"
+        price = RUSSIAN_NUMBER_PRICE
+
+    row = get_stats(user_id)
+
+    if row[0] < price:
         await query.message.reply_text(
-            "❌ Balansingiz yetarli emas.\n\n"
-            f"Kerak: {price:,} so‘m\n"
-            f"Balansingiz: {get_user(user_id)[2]:,.0f} so‘m"
+            f"❌ Balansingiz yetarli emas.\n\n"
+            f"Narx: {price:,} so‘m\n"
+            f"Balans: {row[0]:,.0f} so‘m"
         )
         return
+
+    change_balance(user_id, -price)
 
     con = db()
     cur = con.cursor()
 
     cur.execute("""
-        INSERT INTO orders
-        (user_id, type, amount, details, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO number_orders
+    (user_id, country, amount, status, created_at)
+    VALUES (?, ?, ?, 'pending', ?)
     """, (
         user_id,
-        "stars",
+        country,
         price,
-        f"{amount} Stars",
-        "pending",
         datetime.now().isoformat()
     ))
 
@@ -554,330 +363,312 @@ async def buy_stars(update, context):
     con.close()
 
     await query.message.reply_text(
-        "✅ Buyurtma qabul qilindi!\n\n"
-        f"⭐ Stars: {amount}\n"
-        f"💰 To‘lov: {price:,} so‘m\n"
+        f"✅ Buyurtma qabul qilindi!\n\n"
+        f"📱 Davlat: {country}\n"
+        f"💰 Narx: {price:,} so‘m\n"
         f"🆔 Buyurtma: #{order_id}\n\n"
-        "⏳ Admin tasdiqlagach Stars yuboriladi."
+        f"⏳ Admin tasdiqlashini kuting."
     )
 
-    await context.bot.send_message(
-        ADMIN_ID,
-        f"⭐ YANGI STARS BUYURTMASI\n\n"
-        f"🆔 Buyurtma: #{order_id}\n"
-        f"👤 User: {user_id}\n"
-        f"⭐ Stars: {amount}\n"
-        f"💰 Summa: {price:,} so‘m"
-    )
-
-
-# =========================================================
-# NOMER OLISH
-# =========================================================
-
-async def numbers_menu(update, context):
-    con = db()
-    cur = con.cursor()
-
-    cur.execute("""
-        SELECT country, COUNT(*)
-        FROM numbers
-        WHERE sold=0
-        GROUP BY country
-    """)
-
-    rows = cur.fetchall()
-    con.close()
-
-    keyboard = []
-
-    for country, count in rows:
-        keyboard.append([
-            InlineKeyboardButton(
-                f"{country} 🇹🇯 {NUMBER_PRICE:,} so‘m ({count})",
-                callback_data=f"number_{country}"
+    if ADMIN_ID:
+        try:
+            await context.bot.send_message(
+                ADMIN_ID,
+                f"📱 <b>YANGI NOMER BUYURTMASI</b>\n\n"
+                f"👤 ID: <code>{user_id}</code>\n"
+                f"🌍 {country}\n"
+                f"💰 {price:,} so‘m\n"
+                f"🆔 #{order_id}",
+                parse_mode="HTML"
             )
-        ])
+        except:
+            pass
 
-    if not keyboard:
-        await update.message.reply_text(
-            "📱 Hozircha mavjud nomer yo‘q."
-        )
-        return
+
+# =========================================================
+# STARS
+# =========================================================
+
+async def stars(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    buttons = [
+        [
+            InlineKeyboardButton("⭐ 50 Stars", callback_data="stars_50"),
+            InlineKeyboardButton("⭐ 100 Stars", callback_data="stars_100"),
+        ],
+        [
+            InlineKeyboardButton("⭐ 200 Stars", callback_data="stars_200"),
+            InlineKeyboardButton("⭐ 500 Stars", callback_data="stars_500"),
+        ],
+        [
+            InlineKeyboardButton("⭐ 1000 Stars", callback_data="stars_1000"),
+        ],
+        [
+            InlineKeyboardButton(
+                "✏️ Boshqa miqdor",
+                callback_data="stars_custom"
+            )
+        ]
+    ]
 
     await update.message.reply_text(
-        "📱 NOMER OLISH\n\n"
-        f"💰 Narxi: {NUMBER_PRICE:,} so‘m\n\n"
-        "Davlatni tanlang:",
-        reply_markup=InlineKeyboardMarkup(keyboard)
+        "⭐ <b>STARS OLISH</b>\n\n"
+        f"Kurs: <b>1 Stars = {STARS_RATE} so‘m</b>\n\n"
+        "Kerakli miqdorni tanlang:",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(buttons)
     )
 
 
-async def buy_number(update, context):
+async def stars_buy(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     query = update.callback_query
     await query.answer()
 
-    country = query.data.replace("number_", "")
+    amount = int(query.data.split("_")[1])
+    price = amount * STARS_RATE
+
     user_id = query.from_user.id
+    row = get_stats(user_id)
 
-    con = db()
-    cur = con.cursor()
-
-    cur.execute("""
-        SELECT id, number
-        FROM numbers
-        WHERE country=? AND sold=0
-        LIMIT 1
-    """, (country,))
-
-    row = cur.fetchone()
-
-    if not row:
-        con.close()
-
+    if row[0] < price:
         await query.message.reply_text(
-            "❌ Bu davlat bo‘yicha nomer qolmagan."
+            f"❌ Balans yetarli emas.\n\n"
+            f"⭐ {amount} Stars\n"
+            f"💰 Narx: {price:,} so‘m\n"
+            f"💳 Balansingiz: {row[0]:,.0f} so‘m"
         )
         return
 
-    if not remove_balance(user_id, NUMBER_PRICE):
-        con.close()
+    change_balance(user_id, -price)
+    change_stars(user_id, amount)
 
-        await query.message.reply_text(
-            f"❌ Balansingiz yetarli emas.\n\n"
-            f"Kerak: {NUMBER_PRICE:,} so‘m\n"
-            f"Balansingiz: {get_user(user_id)[2]:,.0f} so‘m"
-        )
-        return
-
-    number_id, number = row
-
-    cur.execute(
-        "UPDATE numbers SET sold=1 WHERE id=?",
-        (number_id,)
+    await query.message.reply_text(
+        f"✅ <b>Stars qo‘shildi!</b>\n\n"
+        f"⭐ Miqdor: {amount}\n"
+        f"💰 To‘lov: {price:,} so‘m",
+        parse_mode="HTML"
     )
 
-    cur.execute("""
-        INSERT INTO orders
-        (user_id, type, amount, details, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (
-        user_id,
-        "number",
-        NUMBER_PRICE,
-        f"{country}: {number}",
-        "completed",
-        datetime.now().isoformat()
-    ))
+
+async def stars_custom(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    context.user_data["waiting_stars"] = True
+
+    await update.callback_query.answer()
+
+    await update.callback_query.message.reply_text(
+        "✏️ Stars miqdorini yozing.\n\n"
+        "Masalan: <b>750</b>",
+        parse_mode="HTML"
+    )
+
+
+async def custom_stars_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if not context.user_data.get("waiting_stars"):
+        return False
+
+    try:
+        amount = int(update.message.text.strip())
+    except:
+        await update.message.reply_text("❌ Faqat raqam yozing.")
+        return True
+
+    if amount < 1:
+        await update.message.reply_text("❌ Miqdor 1 dan katta bo‘lsin.")
+        return True
+
+    price = amount * STARS_RATE
+    user_id = update.effective_user.id
+
+    row = get_stats(user_id)
+
+    if row[0] < price:
+        await update.message.reply_text(
+            f"❌ Balans yetarli emas.\n\n"
+            f"⭐ {amount} Stars\n"
+            f"💰 Kerak: {price:,} so‘m\n"
+            f"💳 Balans: {row[0]:,.0f} so‘m"
+        )
+        context.user_data["waiting_stars"] = False
+        return True
+
+    change_balance(user_id, -price)
+    change_stars(user_id, amount)
+
+    context.user_data["waiting_stars"] = False
+
+    await update.message.reply_text(
+        f"✅ <b>{amount} Stars</b> qo‘shildi!\n\n"
+        f"💰 {price:,} so‘m",
+        parse_mode="HTML"
+    )
+
+    return True
+
+
+# =========================================================
+# PREMIUM
+# =========================================================
+
+async def premium(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    row = get_stats(update.effective_user.id)
+
+    refs = row[2]
+    claimed = row[3]
+
+    if claimed:
+        await update.message.reply_text(
+            "❌ Siz 1 oylik Premiumni oldin olgansiz."
+        )
+        return
+
+    if refs < PREMIUM_REFERRALS:
+
+        left = PREMIUM_REFERRALS - refs
+
+        await update.message.reply_text(
+            f"💎 <b>TELEGRAM PREMIUM</b>\n\n"
+            f"🎁 1 oylik Premium\n"
+            f"👥 Kerak: <b>{PREMIUM_REFERRALS} ta referal</b>\n"
+            f"👤 Sizda: <b>{refs} ta</b>\n\n"
+            f"Qolgan: <b>{left} ta</b>",
+            parse_mode="HTML"
+        )
+
+        return
+
+    con = db()
+
+    con.execute(
+        "UPDATE users SET premium_claimed=1 WHERE id=?",
+        (update.effective_user.id,)
+    )
 
     con.commit()
     con.close()
 
-    await query.message.reply_text(
-        "✅ NOMER OLINDI!\n\n"
-        f"🌍 Davlat: {country}\n"
-        f"📱 Nomer: `{number}`\n\n"
-        f"💰 To‘lov: {NUMBER_PRICE:,} so‘m",
-        parse_mode="Markdown"
-    )
-
-    await context.bot.send_message(
-        ADMIN_ID,
-        f"📱 NOMER SOTILDI\n\n"
-        f"👤 User: {user_id}\n"
-        f"🌍 {country}\n"
-        f"📱 {number}"
-    )
-
-
-# =========================================================
-# NAKRUTKA
-# =========================================================
-
-async def nakrutka(update, context):
     await update.message.reply_text(
-        "📈 TELEGRAM NAKRUTKA\n\n"
-        f"📢 1 ta buyurtma: {NAKRUTKA_PRICE:,} so‘m\n\n"
-        "Buyurtma berish uchun:\n"
-        "kanal yoki guruh username'ini yuboring.\n\n"
-        "Masalan:\n"
-        "@kanal"
+        "🎉 <b>Tabriklaymiz!</b>\n\n"
+        "💎 Siz 1 oylik Telegram Premium uchun mukofotni oldingiz.\n\n"
+        "Admin siz bilan bog‘lanadi.",
+        parse_mode="HTML"
     )
 
-    context.user_data["nakrutka"] = True
-
-
-# =========================================================
-# TEXT HANDLER
-# =========================================================
-
-async def text_handler(update, context):
-    text = update.message.text
-    user_id = update.effective_user.id
-
-    # Stars custom
-    if context.user_data.get("waiting_stars"):
-        context.user_data["waiting_stars"] = False
-
-        try:
-            amount = int(text)
-
-            if amount < 50 or amount > 1000:
-                await update.message.reply_text(
-                    "❌ Miqdor 50 dan 1000 gacha bo‘lishi kerak."
-                )
-                return
-
-            price = amount * STARS_RATE
-
-            context.user_data["custom_star_amount"] = amount
-
-            await update.message.reply_text(
-                f"⭐ {amount} Stars\n"
-                f"💰 {price:,} so‘m\n\n"
-                "Sotib olish uchun tasdiqlang.",
-                reply_markup=InlineKeyboardMarkup([
-                    [
-                        InlineKeyboardButton(
-                            "✅ Sotib olish",
-                            callback_data=f"buy_stars_{amount}"
-                        )
-                    ]
-                ])
-            )
-
-        except:
-            await update.message.reply_text(
-                "❌ Faqat raqam yozing. Masalan: 350"
-            )
-
-        return
-
-    # Nakrutka
-    if context.user_data.get("nakrutka"):
-        context.user_data["nakrutka"] = False
-
-        order = text.strip()
-
-        if not order.startswith("@"):
-            await update.message.reply_text(
-                "❌ Username @ bilan boshlanishi kerak."
-            )
-            return
-
-        con = db()
-        cur = con.cursor()
-
-        cur.execute("""
-            INSERT INTO orders
-            (user_id, type, amount, details, status, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (
-            user_id,
-            "nakrutka",
-            NAKRUTKA_PRICE,
-            order,
-            "pending",
-            datetime.now().isoformat()
-        ))
-
-        order_id = cur.lastrowid
-
-        con.commit()
-        con.close()
-
-        if not remove_balance(user_id, NAKRUTKA_PRICE):
-            await update.message.reply_text(
-                "❌ Balansingiz yetarli emas."
-            )
-            return
-
-        await update.message.reply_text(
-            f"✅ Buyurtma qabul qilindi!\n\n"
-            f"📢 {order}\n"
-            f"💰 {NAKRUTKA_PRICE:,} so‘m\n"
-            f"🆔 #{order_id}"
-        )
-
+    if ADMIN_ID:
         await context.bot.send_message(
             ADMIN_ID,
-            f"📈 NAKRUTKA BUYURTMASI\n\n"
-            f"🆔 #{order_id}\n"
-            f"👤 User: {user_id}\n"
-            f"📢 {order}\n"
-            f"💰 {NAKRUTKA_PRICE:,} so‘m"
+            f"💎 <b>PREMIUM MUKOFOT</b>\n\n"
+            f"👤 User ID: <code>{update.effective_user.id}</code>\n"
+            f"👥 40 ta referal yig‘di.",
+            parse_mode="HTML"
         )
-
-        return
-
-    # Menu
-    if text == "📱 Nomer olish":
-        await numbers_menu(update, context)
-
-    elif text == "⭐ Stars olish":
-        await stars_menu(update, context)
-
-    elif text == "💎 Premium olish":
-        await premium(update, context)
-
-    elif text == "💰 Pul ishlash":
-        await earn(update, context)
-
-    elif text == "💳 Balans":
-        await balance(update, context)
-
-    elif text == "👤 Profil":
-        await profile(update, context)
-
-    elif text == "📈 Telegram nakrutka":
-        await nakrutka(update, context)
-
-    elif text == "💸 Pul yechish":
-        context.user_data["withdraw"] = True
-
-        await update.message.reply_text(
-            f"💸 PUL YECHISH\n\n"
-            f"Minimum: {MIN_WITHDRAW:,} so‘m\n\n"
-            "Avval summani yozing.\n"
-            "Masalan: 30000"
-        )
-
-    elif text == "📋 Buyurtmalarim":
-        await my_orders(update, context)
-
-    elif text == "ℹ️ Yordam":
-        await update.message.reply_text(
-            "ℹ️ YORDAM\n\n"
-            "Muammo yoki savollar bo‘lsa admin bilan bog‘laning."
-        )
-
-    elif text == "👑 Admin":
-        if user_id == ADMIN_ID:
-            await admin_menu(update, context)
 
 
 # =========================================================
-# PUL TO‘LDIRISH / CHEK
+# PUL ISHLASH
 # =========================================================
 
-async def payment_photo(update, context):
+async def earning(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     user_id = update.effective_user.id
 
-    if not update.message.photo:
-        return
+    bot_username = (await context.bot.get_me()).username
 
-    photo = update.message.photo[-1].file_id
+    link = f"https://t.me/{bot_username}?start={user_id}"
+
+    row = get_stats(user_id)
+
+    await update.message.reply_text(
+        f"💰 <b>PUL ISHLASH</b>\n\n"
+        f"👥 1 ta referal = <b>{REF_MONEY:,} so‘m</b>\n"
+        f"⭐ 1 ta referal = <b>{REF_STARS} Stars</b>\n\n"
+        f"👥 Sizning referallaringiz: <b>{row[2]} ta</b>\n\n"
+        f"🔗 <b>Sizning referal havolangiz:</b>\n"
+        f"<code>{link}</code>\n\n"
+        f"40 ta referal yig‘sangiz:\n"
+        f"💎 1 oylik Premium olish imkoniyati mavjud.",
+        parse_mode="HTML"
+    )
+
+
+# =========================================================
+# PUL TO‘LDIRISH
+# =========================================================
+
+async def topup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    context.user_data["waiting_payment_amount"] = True
+
+    await update.message.reply_text(
+        f"💳 <b>HISOB TO‘LDIRISH</b>\n\n"
+        f"💳 Karta: <code>{PAYMENT_CARD}</code>\n\n"
+        f"1️⃣ Kartaga pul o‘tkazing.\n"
+        f"2️⃣ To‘lov summasini yozing.\n"
+        f"3️⃣ Keyin chek rasmini yuboring.\n\n"
+        f"Masalan: <b>50000</b>",
+        parse_mode="HTML"
+    )
+
+
+async def payment_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if not context.user_data.get("waiting_payment_amount"):
+        return False
+
+    try:
+        amount = float(update.message.text.replace(",", "").replace(" ", ""))
+    except:
+        await update.message.reply_text("❌ Summani raqamda yozing.")
+        return True
+
+    if amount < 1000:
+        await update.message.reply_text(
+            "❌ Minimal to‘lov 1 000 so‘m."
+        )
+        return True
+
+    context.user_data["payment_amount"] = amount
+    context.user_data["waiting_payment_amount"] = False
+    context.user_data["waiting_receipt"] = True
+
+    await update.message.reply_text(
+        f"💰 Summa: <b>{amount:,.0f} so‘m</b>\n\n"
+        "Endi <b>chek rasmini</b> yuboring.",
+        parse_mode="HTML"
+    )
+
+    return True
+
+
+async def receipt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if not context.user_data.get("waiting_receipt"):
+        return False
+
+    if not update.message.photo:
+        await update.message.reply_text(
+            "❌ Chekni rasm ko‘rinishida yuboring."
+        )
+        return True
+
+    amount = context.user_data.get("payment_amount")
+
+    photo = update.message.photo[-1]
 
     con = db()
     cur = con.cursor()
 
     cur.execute("""
-        INSERT INTO payments
-        (user_id, photo_id, status, created_at)
-        VALUES (?, ?, 'pending', ?)
+    INSERT INTO payments
+    (user_id, amount, status, receipt_file, created_at)
+    VALUES (?, ?, 'pending', ?, ?)
     """, (
-        user_id,
-        photo,
+        update.effective_user.id,
+        amount,
+        photo.file_id,
         datetime.now().isoformat()
     ))
 
@@ -886,153 +677,137 @@ async def payment_photo(update, context):
     con.commit()
     con.close()
 
+    context.user_data["waiting_receipt"] = False
+    context.user_data["payment_amount"] = None
+
     await update.message.reply_text(
-        "✅ Chek qabul qilindi.\n\n"
-        "⏳ Admin tekshiradi va tasdiqlagandan so‘ng "
-        "hisobingizga pul qo‘shiladi."
+        f"✅ Chek qabul qilindi.\n\n"
+        f"💰 Summa: {amount:,.0f} so‘m\n"
+        f"🆔 To‘lov: #{payment_id}\n\n"
+        f"⏳ Admin tasdiqlashini kuting."
     )
 
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "💰 Summani kiritish",
-                callback_data=f"payment_{payment_id}"
+    if ADMIN_ID:
+        try:
+            await context.bot.send_photo(
+                ADMIN_ID,
+                photo.file_id,
+                caption=(
+                    f"💳 YANGI TO‘LOV\n\n"
+                    f"👤 User ID: {update.effective_user.id}\n"
+                    f"💰 Summa: {amount:,.0f} so‘m\n"
+                    f"🆔 #{payment_id}"
+                ),
+                reply_markup=InlineKeyboardMarkup([
+                    [
+                        InlineKeyboardButton(
+                            "✅ Tasdiqlash",
+                            callback_data=f"pay_ok_{payment_id}"
+                        ),
+                        InlineKeyboardButton(
+                            "❌ Rad etish",
+                            callback_data=f"pay_no_{payment_id}"
+                        )
+                    ]
+                ])
             )
-        ],
-        [
-            InlineKeyboardButton(
-                "❌ Rad etish",
-                callback_data=f"reject_payment_{payment_id}"
-            )
-        ]
-    ])
+        except:
+            pass
 
-    await context.bot.send_photo(
-        ADMIN_ID,
-        photo,
-        caption=(
-            f"💳 YANGI TO‘LOV CHEKI\n\n"
-            f"🆔 Payment: #{payment_id}\n"
-            f"👤 User ID: {user_id}\n\n"
-            "Tasdiqlash uchun summani o‘zingiz kiriting."
-        ),
-        reply_markup=keyboard
-    )
+    return True
 
 
 # =========================================================
-# ADMIN TO‘LOV SUMMASI
+# PUL CHIQARISH
 # =========================================================
 
-async def payment_callback(update, context):
-    query = update.callback_query
-    await query.answer()
+async def withdraw(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    if query.from_user.id != ADMIN_ID:
+    row = get_stats(update.effective_user.id)
+
+    if row[0] < MIN_WITHDRAW:
+        await update.message.reply_text(
+            f"❌ Pul chiqarish uchun minimal summa "
+            f"<b>{MIN_WITHDRAW:,} so‘m</b>.\n\n"
+            f"💰 Sizda: {row[0]:,.0f} so‘m",
+            parse_mode="HTML"
+        )
         return
 
-    payment_id = int(query.data.split("_")[1])
+    context.user_data["withdraw_amount"] = True
 
-    context.user_data["payment_id"] = payment_id
-    context.user_data["waiting_payment_amount"] = True
-
-    await query.message.reply_text(
-        f"💰 Payment #{payment_id}\n\n"
-        "Hisobga qo‘shiladigan summani yozing.\n\n"
-        "Masalan:\n50000"
+    await update.message.reply_text(
+        f"💸 <b>PUL CHIQARISH</b>\n\n"
+        f"Minimal: {MIN_WITHDRAW:,} so‘m\n"
+        f"Balans: {row[0]:,.0f} so‘m\n\n"
+        f"Qancha chiqarishni yozing:",
+        parse_mode="HTML"
     )
 
 
-async def reject_payment(update, context):
-    query = update.callback_query
-    await query.answer()
+async def withdraw_amount(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    if query.from_user.id != ADMIN_ID:
-        return
-
-    payment_id = int(query.data.split("_")[2])
-
-    con = db()
-    cur = con.cursor()
-
-    cur.execute(
-        "UPDATE payments SET status='rejected' WHERE id=?",
-        (payment_id,)
-    )
-
-    con.commit()
-    con.close()
-
-    await query.message.reply_text(
-        f"❌ Payment #{payment_id} rad etildi."
-    )
-
-
-# =========================================================
-# WITHDRAW
-# =========================================================
-
-async def withdrawal_text(update, context):
-    if not context.user_data.get("withdraw"):
+    if not context.user_data.get("withdraw_amount"):
         return False
 
-    user_id = update.effective_user.id
-
     try:
-        amount = float(update.message.text)
-
-        if amount < MIN_WITHDRAW:
-            await update.message.reply_text(
-                f"❌ Minimum {MIN_WITHDRAW:,} so‘m."
-            )
-            return True
-
-        user = get_user(user_id)
-
-        if user[2] < amount:
-            await update.message.reply_text(
-                "❌ Balansingiz yetarli emas."
-            )
-            return True
-
-        context.user_data["withdraw_amount"] = amount
-        context.user_data["withdraw"] = False
-        context.user_data["waiting_card"] = True
-
-        await update.message.reply_text(
-            "💳 Endi karta raqamingizni yuboring."
-        )
-
-        return True
-
+        amount = float(update.message.text.replace(",", "").replace(" ", ""))
     except:
+        await update.message.reply_text("❌ Raqam yozing.")
+        return True
+
+    user_id = update.effective_user.id
+    row = get_stats(user_id)
+
+    if amount < MIN_WITHDRAW:
         await update.message.reply_text(
-            "❌ Summani to‘g‘ri yozing."
+            f"❌ Minimal {MIN_WITHDRAW:,} so‘m."
         )
         return True
 
+    if amount > row[0]:
+        await update.message.reply_text(
+            "❌ Balansingiz yetarli emas."
+        )
+        return True
 
-async def withdrawal_card(update, context):
+    context.user_data["withdraw_amount_value"] = amount
+    context.user_data["withdraw_amount"] = False
+    context.user_data["waiting_card"] = True
+
+    await update.message.reply_text(
+        "💳 Pul tushadigan karta raqamini yuboring."
+    )
+
+    return True
+
+
+async def withdraw_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     if not context.user_data.get("waiting_card"):
         return False
 
-    user_id = update.effective_user.id
     card = update.message.text.strip()
-    amount = context.user_data["withdraw_amount"]
+    amount = context.user_data.get("withdraw_amount_value")
+    user_id = update.effective_user.id
 
-    if not remove_balance(user_id, amount):
+    row = get_stats(user_id)
+
+    if amount > row[0]:
         await update.message.reply_text(
             "❌ Balans yetarli emas."
         )
         return True
 
+    change_balance(user_id, -amount)
+
     con = db()
     cur = con.cursor()
 
     cur.execute("""
-        INSERT INTO withdrawals
-        (user_id, amount, card, status, created_at)
-        VALUES (?, ?, ?, 'pending', ?)
+    INSERT INTO withdrawals
+    (user_id, amount, card, status, created_at)
+    VALUES (?, ?, ?, 'pending', ?)
     """, (
         user_id,
         amount,
@@ -1040,28 +815,31 @@ async def withdrawal_card(update, context):
         datetime.now().isoformat()
     ))
 
-    wid = cur.lastrowid
+    withdrawal_id = cur.lastrowid
 
     con.commit()
     con.close()
 
     context.user_data["waiting_card"] = False
+    context.user_data["withdraw_amount_value"] = None
 
     await update.message.reply_text(
-        f"✅ Pul yechish so‘rovi yuborildi.\n\n"
+        f"✅ Pul chiqarish so‘rovi yuborildi.\n\n"
         f"💰 Summa: {amount:,.0f} so‘m\n"
-        f"🆔 #{wid}\n\n"
-        "⏳ Admin tekshiradi."
+        f"🆔 #{withdrawal_id}\n\n"
+        f"⏳ Admin to‘lovni amalga oshiradi."
     )
 
-    await context.bot.send_message(
-        ADMIN_ID,
-        f"💸 YANGI PUL YECHISH\n\n"
-        f"🆔 #{wid}\n"
-        f"👤 User: {user_id}\n"
-        f"💰 {amount:,.0f} so‘m\n"
-        f"💳 Karta: {card}"
-    )
+    if ADMIN_ID:
+        await context.bot.send_message(
+            ADMIN_ID,
+            f"💸 <b>PUL CHIQARISH</b>\n\n"
+            f"👤 User: <code>{user_id}</code>\n"
+            f"💰 {amount:,.0f} so‘m\n"
+            f"💳 <code>{card}</code>\n"
+            f"🆔 #{withdrawal_id}",
+            parse_mode="HTML"
+        )
 
     return True
 
@@ -1070,18 +848,19 @@ async def withdrawal_card(update, context):
 # BUYURTMALAR
 # =========================================================
 
-async def my_orders(update, context):
+async def orders(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     user_id = update.effective_user.id
 
     con = db()
     cur = con.cursor()
 
     cur.execute("""
-        SELECT id, type, amount, details, status
-        FROM orders
-        WHERE user_id=?
-        ORDER BY id DESC
-        LIMIT 10
+    SELECT id, country, amount, status
+    FROM number_orders
+    WHERE user_id=?
+    ORDER BY id DESC
+    LIMIT 10
     """, (user_id,))
 
     rows = cur.fetchall()
@@ -1089,323 +868,393 @@ async def my_orders(update, context):
 
     if not rows:
         await update.message.reply_text(
-            "📋 Sizda hali buyurtmalar yo‘q."
+            "📋 Sizda hozircha buyurtmalar yo‘q."
         )
         return
 
-    text = "📋 BUYURTMALARIM\n\n"
+    text = "📋 <b>BUYURTMALARIM</b>\n\n"
 
     for row in rows:
         text += (
             f"🆔 #{row[0]}\n"
-            f"📦 {row[1]}\n"
+            f"🌍 {row[1]}\n"
             f"💰 {row[2]:,.0f} so‘m\n"
-            f"📌 {row[4]}\n\n"
+            f"📌 {row[3]}\n\n"
         )
 
-    await update.message.reply_text(text)
-
-
-# =========================================================
-# ADMIN MENU
-# =========================================================
-
-def admin_keyboard():
-    return ReplyKeyboardMarkup(
-        [
-            ["➕ Balans qo‘shish", "➕ Nomer qo‘shish"],
-            ["⭐ Stars berish", "📊 Statistika"],
-            ["📢 Reklama", "💸 Chiqimlar"],
-            ["🏠 Asosiy menyu"],
-        ],
-        resize_keyboard=True
+    await update.message.reply_text(
+        text,
+        parse_mode="HTML"
     )
 
 
-async def admin_menu(update, context):
+# =========================================================
+# YORDAM
+# =========================================================
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    await update.message.reply_text(
+        "ℹ️ <b>YORDAM</b>\n\n"
+        "📱 Nomer olish — Tojik/Rossiya nomerlari\n"
+        "⭐ Stars olish — 50 dan boshlab\n"
+        "💎 Premium — 40 referalga\n"
+        "💰 Pul ishlash — referal orqali\n"
+        "💳 Hisobim — balans va Stars\n"
+        "💸 Pul chiqarish — minimal 30 000 so‘m\n"
+        "💳 Hisob to‘ldirish — chek orqali",
+        parse_mode="HTML"
+    )
+
+
+# =========================================================
+# ADMIN
+# =========================================================
+
+async def admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     if update.effective_user.id != ADMIN_ID:
         return
 
     await update.message.reply_text(
-        "👑 ADMIN PANEL",
+        "👑 <b>ADMIN PANEL</b>",
+        parse_mode="HTML",
         reply_markup=admin_keyboard()
     )
 
 
-# =========================================================
-# ADMIN TEXT
-# =========================================================
+async def admin_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-async def admin_text(update, context):
-    if update.effective_user.id != ADMIN_ID:
-        return False
+    query = update.callback_query
+    await query.answer()
 
-    text = update.message.text
+    if query.from_user.id != ADMIN_ID:
+        return
 
-    if context.user_data.get("waiting_payment_amount"):
-        try:
-            amount = float(text)
-        except:
-            await update.message.reply_text(
-                "❌ Summani raqam bilan yozing."
-            )
-            return True
+    data = query.data
 
-        payment_id = context.user_data["payment_id"]
+    # -----------------------------------------------------
+    # TO‘LOV TASDIQLASH
+    # -----------------------------------------------------
+
+    if data.startswith("pay_ok_"):
+
+        payment_id = int(data.split("_")[2])
 
         con = db()
         cur = con.cursor()
 
-        cur.execute(
-            "SELECT user_id FROM payments WHERE id=?",
-            (payment_id,)
-        )
+        cur.execute("""
+        SELECT user_id, amount, status
+        FROM payments
+        WHERE id=?
+        """, (payment_id,))
 
         row = cur.fetchone()
 
         if not row:
             con.close()
-            return True
+            await query.message.reply_text("❌ To‘lov topilmadi.")
+            return
 
-        user_id = row[0]
+        user_id, amount, status = row
+
+        if status != "pending":
+            con.close()
+            await query.message.reply_text(
+                "⚠️ Bu to‘lov allaqachon ko‘rib chiqilgan."
+            )
+            return
 
         cur.execute("""
-            UPDATE payments
-            SET status='approved', amount=?
-            WHERE id=?
-        """, (
-            amount,
-            payment_id
-        ))
+        UPDATE payments
+        SET status='approved'
+        WHERE id=?
+        """, (payment_id,))
 
-        cur.execute(
-            "UPDATE users SET balance=balance+? WHERE id=?",
-            (amount, user_id)
-        )
+        cur.execute("""
+        UPDATE users
+        SET balance=balance+?
+        WHERE id=?
+        """, (amount, user_id))
 
         con.commit()
         con.close()
 
-        context.user_data["waiting_payment_amount"] = False
-
-        await update.message.reply_text(
-            f"✅ Payment #{payment_id} tasdiqlandi.\n"
+        await query.message.reply_text(
+            f"✅ To‘lov tasdiqlandi.\n"
             f"💰 {amount:,.0f} so‘m qo‘shildi."
         )
 
         try:
             await context.bot.send_message(
                 user_id,
-                f"✅ To‘lov tasdiqlandi!\n\n"
-                f"💰 Hisobingizga {amount:,.0f} so‘m qo‘shildi."
+                f"✅ <b>To‘lov tasdiqlandi!</b>\n\n"
+                f"💰 Balansingizga "
+                f"<b>{amount:,.0f} so‘m</b> qo‘shildi.",
+                parse_mode="HTML"
             )
         except:
             pass
 
-        return True
+    # -----------------------------------------------------
+    # TO‘LOV RAD
+    # -----------------------------------------------------
 
-    if text == "➕ Balans qo‘shish":
-        context.user_data["admin_balance"] = True
+    elif data.startswith("pay_no_"):
 
-        await update.message.reply_text(
-            "👤 User ID va summani yozing.\n\n"
-            "Misol:\n"
-            "123456789 50000"
-        )
-        return True
-
-    if context.user_data.get("admin_balance"):
-        parts = text.split()
-
-        if len(parts) != 2:
-            await update.message.reply_text(
-                "❌ Misol: 123456789 50000"
-            )
-            return True
-
-        try:
-            uid = int(parts[0])
-            amount = float(parts[1])
-        except:
-            await update.message.reply_text(
-                "❌ Xato."
-            )
-            return True
-
-        add_balance(uid, amount)
-
-        context.user_data["admin_balance"] = False
-
-        await update.message.reply_text(
-            "✅ Balans qo‘shildi."
-        )
-
-        try:
-            await context.bot.send_message(
-                uid,
-                f"💰 Hisobingizga {amount:,.0f} so‘m qo‘shildi."
-            )
-        except:
-            pass
-
-        return True
-
-    if text == "⭐ Stars berish":
-        context.user_data["admin_stars"] = True
-
-        await update.message.reply_text(
-            "User ID va Stars miqdorini yozing.\n\n"
-            "Misol:\n"
-            "123456789 100"
-        )
-        return True
-
-    if context.user_data.get("admin_stars"):
-        parts = text.split()
-
-        try:
-            uid = int(parts[0])
-            amount = int(parts[1])
-        except:
-            await update.message.reply_text(
-                "❌ Misol: 123456789 100"
-            )
-            return True
-
-        add_stars(uid, amount)
-
-        context.user_data["admin_stars"] = False
-
-        await update.message.reply_text(
-            "✅ Stars berildi."
-        )
-
-        try:
-            await context.bot.send_message(
-                uid,
-                f"⭐ Sizga {amount} Stars berildi!"
-            )
-        except:
-            pass
-
-        return True
-
-    if text == "➕ Nomer qo‘shish":
-        context.user_data["admin_number"] = True
-
-        await update.message.reply_text(
-            "Davlat va nomerni yozing.\n\n"
-            "Misol:\n"
-            "Tojikiston +992900000000\n\n"
-            "Yoki:\n"
-            "Rossiya +79990000000"
-        )
-        return True
-
-    if context.user_data.get("admin_number"):
-        parts = text.split(maxsplit=1)
-
-        if len(parts) != 2:
-            await update.message.reply_text(
-                "❌ Davlat va nomerni yozing."
-            )
-            return True
-
-        country = parts[0]
-        number = parts[1]
+        payment_id = int(data.split("_")[2])
 
         con = db()
+
         cur = con.cursor()
 
         cur.execute("""
-            INSERT INTO numbers(country, number, sold)
-            VALUES (?, ?, 0)
-        """, (
-            country,
-            number
-        ))
+        SELECT user_id, status
+        FROM payments
+        WHERE id=?
+        """, (payment_id,))
 
-        con.commit()
+        row = cur.fetchone()
+
+        if not row:
+            con.close()
+            return
+
+        user_id, status = row
+
+        if status == "pending":
+            cur.execute("""
+            UPDATE payments
+            SET status='rejected'
+            WHERE id=?
+            """, (payment_id,))
+
+            con.commit()
+
         con.close()
 
-        context.user_data["admin_number"] = False
-
-        await update.message.reply_text(
-            "✅ Nomer qo‘shildi."
+        await query.message.reply_text(
+            "❌ To‘lov rad etildi."
         )
 
-        return True
+        try:
+            await context.bot.send_message(
+                user_id,
+                "❌ To‘lovingiz rad etildi. Chek yoki summa noto‘g‘ri bo‘lishi mumkin."
+            )
+        except:
+            pass
 
-    if text == "📊 Statistika":
+    # -----------------------------------------------------
+    # USERS
+    # -----------------------------------------------------
+
+    elif data == "admin_users":
+
         con = db()
         cur = con.cursor()
 
         cur.execute("SELECT COUNT(*) FROM users")
         users = cur.fetchone()[0]
 
-        cur.execute("SELECT COALESCE(SUM(balance),0) FROM users")
-        balance_sum = cur.fetchone()[0]
+        cur.execute("SELECT SUM(balance) FROM users")
+        balance = cur.fetchone()[0] or 0
 
-        cur.execute("SELECT COUNT(*) FROM numbers WHERE sold=0")
-        numbers = cur.fetchone()[0]
-
-        cur.execute(
-            "SELECT COUNT(*) FROM orders"
-        )
-        orders = cur.fetchone()[0]
+        cur.execute("SELECT SUM(stars) FROM users")
+        stars_total = cur.fetchone()[0] or 0
 
         con.close()
 
-        await update.message.reply_text(
-            "📊 STATISTIKA\n\n"
-            f"👥 Users: {users}\n"
-            f"💰 Balanslar: {balance_sum:,.0f} so‘m\n"
-            f"📱 Mavjud nomerlar: {numbers}\n"
-            f"📦 Buyurtmalar: {orders}"
+        await query.message.reply_text(
+            f"👥 <b>STATISTIKA</b>\n\n"
+            f"👤 Foydalanuvchilar: {users}\n"
+            f"💰 Umumiy balans: {balance:,.0f} so‘m\n"
+            f"⭐ Umumiy Stars: {stars_total:,.0f}",
+            parse_mode="HTML"
         )
 
-        return True
+    # -----------------------------------------------------
+    # PAYMENTS
+    # -----------------------------------------------------
 
-    if text == "🏠 Asosiy menyu":
-        await update.message.reply_text(
-            "🏠 Asosiy menyu",
-            reply_markup=main_menu()
-        )
-        return True
+    elif data == "admin_payments":
 
-    return False
+        con = db()
+        cur = con.cursor()
 
+        cur.execute("""
+        SELECT id, user_id, amount, status
+        FROM payments
+        ORDER BY id DESC
+        LIMIT 15
+        """)
 
-# =========================================================
-# ADMIN COMMAND
-# =========================================================
+        rows = cur.fetchall()
+        con.close()
 
-async def admin_command(update, context):
-    if update.effective_user.id != ADMIN_ID:
-        return
-
-    await update.message.reply_text(
-        "👑 ADMIN PANEL",
-        reply_markup=admin_keyboard()
-    )
-
-
-# =========================================================
-# UNIVERSAL MESSAGE
-# =========================================================
-
-async def message_handler(update, context):
-    if update.effective_user.id == ADMIN_ID:
-        if await admin_text(update, context):
+        if not rows:
+            await query.message.reply_text(
+                "To‘lovlar yo‘q."
+            )
             return
 
-    if await withdrawal_text(update, context):
+        text = "💳 <b>TO‘LOVLAR</b>\n\n"
+
+        for r in rows:
+            text += (
+                f"#{r[0]} | "
+                f"ID: {r[1]} | "
+                f"{r[2]:,.0f} so‘m | "
+                f"{r[3]}\n"
+            )
+
+        await query.message.reply_text(
+            text,
+            parse_mode="HTML"
+        )
+
+    # -----------------------------------------------------
+    # NUMBERS
+    # -----------------------------------------------------
+
+    elif data == "admin_numbers":
+
+        con = db()
+        cur = con.cursor()
+
+        cur.execute("""
+        SELECT id, user_id, country, amount, status
+        FROM number_orders
+        ORDER BY id DESC
+        LIMIT 15
+        """)
+
+        rows = cur.fetchall()
+        con.close()
+
+        if not rows:
+            await query.message.reply_text(
+                "Nomer buyurtmalari yo‘q."
+            )
+            return
+
+        text = "📱 <b>NOMER BUYURTMALARI</b>\n\n"
+
+        for r in rows:
+            text += (
+                f"#{r[0]}\n"
+                f"👤 {r[1]}\n"
+                f"🌍 {r[2]}\n"
+                f"💰 {r[3]:,.0f}\n"
+                f"📌 {r[4]}\n\n"
+            )
+
+        await query.message.reply_text(
+            text,
+            parse_mode="HTML"
+        )
+
+    # -----------------------------------------------------
+    # WITHDRAW
+    # -----------------------------------------------------
+
+    elif data == "admin_withdraw":
+
+        con = db()
+        cur = con.cursor()
+
+        cur.execute("""
+        SELECT id, user_id, amount, card, status
+        FROM withdrawals
+        WHERE status='pending'
+        ORDER BY id DESC
+        LIMIT 15
+        """)
+
+        rows = cur.fetchall()
+        con.close()
+
+        if not rows:
+            await query.message.reply_text(
+                "⏳ Kutilayotgan pul chiqarishlar yo‘q."
+            )
+            return
+
+        text = "💸 <b>PUL CHIQARISHLAR</b>\n\n"
+
+        for r in rows:
+            text += (
+                f"#{r[0]}\n"
+                f"👤 {r[1]}\n"
+                f"💰 {r[2]:,.0f} so‘m\n"
+                f"💳 {r[3]}\n"
+                f"📌 {r[4]}\n\n"
+            )
+
+        await query.message.reply_text(
+            text,
+            parse_mode="HTML"
+        )
+
+
+# =========================================================
+# MESSAGE ROUTER
+# =========================================================
+
+async def message_router(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if not update.message:
         return
 
-    if await withdrawal_card(update, context):
-        return
+    # PHOTO / CHEK
+    if update.message.photo:
+        if await receipt(update, context):
+            return
 
-    await text_handler(update, context)
+    text = update.message.text
+
+    # MAXSUS INPUTLAR
+    if text:
+        if await custom_stars_message(update, context):
+            return
+
+        if await payment_amount(update, context):
+            return
+
+        if await withdraw_amount(update, context):
+            return
+
+        if await withdraw_card(update, context):
+            return
+
+    # MENU
+    if text == "📱 Nomer olish":
+        await numbers(update, context)
+
+    elif text == "⭐ Stars olish":
+        await stars(update, context)
+
+    elif text == "💎 Premium olish":
+        await premium(update, context)
+
+    elif text == "💰 Pul ishlash":
+        await earning(update, context)
+
+    elif text == "💳 Hisobim":
+        await account(update, context)
+
+    elif text == "💸 Pul chiqarish":
+        await withdraw(update, context)
+
+    elif text == "📋 Buyurtmalarim":
+        await orders(update, context)
+
+    elif text == "ℹ️ Yordam":
+        await help_command(update, context)
+
+    elif text == "💳 Hisob to‘ldirish":
+        await topup(update, context)
 
 
 # =========================================================
@@ -1413,76 +1262,62 @@ async def message_handler(update, context):
 # =========================================================
 
 def main():
+
     if not BOT_TOKEN:
-        raise RuntimeError("BOT_TOKEN topilmadi.")
+        print("BOT_TOKEN topilmadi!")
+        return
 
     init_db()
 
     app = Application.builder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("admin", admin_command))
+    app.add_handler(
+        CommandHandler("start", start)
+    )
+
+    app.add_handler(
+        CommandHandler("admin", admin)
+    )
 
     app.add_handler(
         CallbackQueryHandler(
-            check_sponsor_callback,
-            pattern="^check_sponsor$"
+            admin_callback,
+            pattern=r"^(pay_ok_|pay_no_|admin_)"
         )
     )
 
     app.add_handler(
         CallbackQueryHandler(
-            stars_callback,
-            pattern="^stars_"
+            number_order,
+            pattern=r"^number_"
         )
     )
 
     app.add_handler(
         CallbackQueryHandler(
-            buy_stars,
-            pattern="^buy_stars_"
+            stars_buy,
+            pattern=r"^stars_(50|100|200|500|1000)$"
         )
     )
 
     app.add_handler(
         CallbackQueryHandler(
-            buy_number,
-            pattern="^number_"
-        )
-    )
-
-    app.add_handler(
-        CallbackQueryHandler(
-            payment_callback,
-            pattern="^payment_"
-        )
-    )
-
-    app.add_handler(
-        CallbackQueryHandler(
-            reject_payment,
-            pattern="^reject_payment_"
+            stars_custom,
+            pattern=r"^stars_custom$"
         )
     )
 
     app.add_handler(
         MessageHandler(
-            filters.PHOTO,
-            payment_photo
+            filters.ALL & ~filters.COMMAND,
+            message_router
         )
     )
 
-    app.add_handler(
-        MessageHandler(
-            filters.TEXT & ~filters.COMMAND,
-            message_handler
-        )
-    )
-
-    print("🔥 TEKIN STARS BOT ISHLAYAPTI")
+    print("BOT ISHLADI...")
 
     app.run_polling(
-        drop_pending_updates=True
+        allowed_updates=Update.ALL_TYPES
     )
 
 
