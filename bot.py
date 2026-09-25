@@ -33,13 +33,12 @@ DB_FILE = "zerikdim.db"
 PAYMENT_CARD = "5614681008971867"
 PAYMENT_OWNER = "RAKHMONOVA/O"
 
-DEFAULT_SPONSOR_CHANNEL = ""
-DEFAULT_SPONSOR_URL = ""
-DEFAULT_SPONSOR_LIMIT = 0
+DEFAULT_SPONSOR_CHANNEL = "@Haroratimsan"
+DEFAULT_SPONSOR_URL = "https://t.me/Haroratimsan"
+DEFAULT_SPONSOR_LIMIT = 380
 
-STARS_RATE = 205
-REFERRAL_STARS = 0.0
-REFERRAL_BONUS = 1000.0
+REFERRAL_STARS = 9.0
+REFERRAL_BONUS = 500.0
 MIN_WITHDRAW = 10000
 MIN_TOPUP = 1000
 
@@ -54,31 +53,15 @@ logger = logging.getLogger(__name__)
 # =========================================================
 
 NUMBERS = {
-    "🇳🇬 Nigeria": 5800,
-    "🇨🇴 Colombia": 5800,
-    "🇧🇩 Bangladesh": 5500,
-    "🇺🇸 USA": 7000,
-    "🇪🇹 Ethiopia": 5800,
-    "🇮🇩 Indonesia": 6500,
+    "🇧🇩 Bangladesh": 6000,
+    "🇺🇸 USA": 6000,
     "🇮🇳 India": 6000,
+    "🇮🇩 Indonesia": 6000,
+    "🇳🇬 Nigeria": 6000,
+    "🇪🇹 Ethiopia": 6000,
     "🇲🇲 Myanmar": 6000,
     "🇺🇿 Uzbekistan": 12000,
-    "🇷🇺 Russia": 25000,
 }
-
-NUMBER_STOCK = {
-    "🇳🇬 Nigeria": 272,
-    "🇨🇴 Colombia": 2515,
-    "🇧🇩 Bangladesh": 257,
-    "🇺🇸 USA": 44,
-    "🇪🇹 Ethiopia": 12,
-    "🇮🇩 Indonesia": 278,
-    "🇮🇳 India": 0,
-    "🇲🇲 Myanmar": 0,
-    "🇺🇿 Uzbekistan": 0,
-    "🇷🇺 Russia": 400,
-}
-
 
 # =========================================================
 # NAKRUTKA
@@ -297,15 +280,6 @@ def init_db():
     )
 
     conn.execute("""
-        CREATE TABLE IF NOT EXISTS number_stock (
-            country TEXT PRIMARY KEY,
-            stock INTEGER DEFAULT 0
-        )
-    """)
-    for _country, _stock in NUMBER_STOCK.items():
-        conn.execute("INSERT OR IGNORE INTO number_stock(country, stock) VALUES(?, ?)", (_country, _stock))
-
-    conn.execute("""
         CREATE TABLE IF NOT EXISTS money_withdrawals (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id INTEGER,
@@ -348,6 +322,37 @@ def init_db():
         VALUES (1, 1, NULL)
     """)
 
+    # Asosiy homiy
+    existing = conn.execute("""
+        SELECT *
+        FROM sponsors
+        WHERE channel=?
+    """, (DEFAULT_SPONSOR_CHANNEL,)).fetchone()
+
+    if existing is None:
+        conn.execute("""
+            INSERT INTO sponsors(
+                channel,
+                url,
+                limit_users,
+                joined_users,
+                active,
+                created_at
+            )
+            VALUES (?, ?, ?, 0, 1, ?)
+        """, (
+            DEFAULT_SPONSOR_CHANNEL,
+            DEFAULT_SPONSOR_URL,
+            DEFAULT_SPONSOR_LIMIT,
+            now_iso()
+        ))
+
+    conn.execute("""
+        UPDATE sponsor_settings
+        SET active=1,
+            disabled_at=NULL
+        WHERE id=1
+    """)
 
     conn.commit()
     conn.close()
@@ -466,58 +471,78 @@ async def is_subscribed(bot, channel, user_id):
         return False
 
 async def check_sponsor(bot, user_id):
-    # Homiy kanallar endi foydalanuvchini bloklamaydi.
+    conn = db()
+
+    sponsors = conn.execute("""
+        SELECT *
+        FROM sponsors
+        WHERE active=1
+    """).fetchall()
+
+    conn.close()
+
+    if not sponsors:
+        return True
+
+    for sponsor in sponsors:
+        if not await is_subscribed(
+            bot,
+            sponsor["channel"],
+            user_id
+        ):
+            return False
+
     return True
 
 def sponsor_keyboard():
     conn = db()
-    rows = conn.execute("SELECT channel, url FROM sponsors WHERE active=1 ORDER BY channel").fetchall()
+
+    rows = conn.execute("""
+        SELECT channel, url
+        FROM sponsors
+        WHERE active=1
+    """).fetchall()
+
     conn.close()
+
     buttons = []
+
     for row in rows:
-        if row["url"]:
-            buttons.append([InlineKeyboardButton(f"📢 {row['channel']}", url=row['url'])])
-    return InlineKeyboardMarkup(buttons) if buttons else None
+        buttons.append([
+            InlineKeyboardButton(
+                f"📢 {row['channel']}",
+                url=row["url"]
+            )
+        ])
+
+    buttons.append([
+        InlineKeyboardButton(
+            "✅ TASDIQLASH",
+            callback_data="check_sponsor"
+        )
+    ])
+
+    return InlineKeyboardMarkup(buttons)
 
 async def show_sponsor(update):
-    text = "📢 <b>HOMIY</b>\n\nHomiy kanal havolalari shu yerda chiqadi."
-    markup = sponsor_keyboard()
+    text = (
+        "🔒 <b>BOTDAN FOYDALANISH UCHUN</b>\n\n"
+        "📢 Avval quyidagi kanal(lar)ga obuna bo‘ling.\n\n"
+        "Keyin <b>✅ TASDIQLASH</b> tugmasini bosing."
+    )
+
     if update.callback_query:
-        await update.callback_query.message.reply_text(text, parse_mode="HTML", reply_markup=markup)
+        await update.callback_query.edit_message_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=sponsor_keyboard()
+        )
     else:
-        await update.effective_message.reply_text(text, parse_mode="HTML", reply_markup=markup)
-
-async def referral_bonus_loop():
-    while True:
-        try:
-            conn = db()
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS referral_bonus_pending (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    referrer_id INTEGER,
-                    referred_id INTEGER UNIQUE,
-                    due_at TEXT,
-                    status TEXT DEFAULT 'pending',
-                    created_at TEXT
-                )
-            """)
-            rows = conn.execute("""
-                SELECT id, referrer_id FROM referral_bonus_pending
-                WHERE status='pending' AND due_at<=?
-            """, (now_iso(),)).fetchall()
-            for row in rows:
-                cur = conn.execute("""
-                    UPDATE referral_bonus_pending SET status='paid'
-                    WHERE id=? AND status='pending'
-                """, (row["id"],))
-                if cur.rowcount == 1:
-                    conn.execute("UPDATE users SET bonus_balance=bonus_balance+? WHERE id=?", (REFERRAL_BONUS, row["referrer_id"]))
-            conn.commit()
-            conn.close()
-        except Exception:
-            logger.exception("Referral bonus loop error")
-        await asyncio.sleep(60)
-
+        await update.effective_message.reply_text(
+            text,
+            parse_mode="HTML",
+            reply_markup=sponsor_keyboard()
+        )
 
 # =========================================================
 # MAIN MENU
@@ -526,12 +551,15 @@ async def referral_bonus_loop():
 def main_keyboard():
     return ReplyKeyboardMarkup(
         [
-            ["💰 PUL ISHLASH", "📱 NOMER OLISH"],
+            ["💰 PUL ISHLASH"],
+            ["💎 PREMIUM", "⭐ STARS"],
+            ["📱 NOMER OLISH", "📈 NAKRUTKA"],
             ["🛍 DO‘KON", "💳 HISOB TO‘LDIRISH"],
-            ["👤 MENING HISOBIM", "📢 HOMIY"],
+            ["👤 MENING HISOBIM", "🤝 HOMIY"],
         ],
         resize_keyboard=True
     )
+
 
 # =========================================================
 # START
@@ -576,28 +604,23 @@ async def start(update, context):
 
                 conn.execute("""
                     UPDATE users
-                    SET referrals=referrals+1
+                    SET referrals=referrals+1,
+                        points=points+?
                     WHERE id=?
-                """, (referrer_id,))
+                """, (
+                    REFERRAL_STARS,
+                    referrer_id
+                ))
 
                 conn.execute("""
-                    CREATE TABLE IF NOT EXISTS referral_bonus_pending (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        referrer_id INTEGER,
-                        referred_id INTEGER UNIQUE,
-                        due_at TEXT,
-                        status TEXT DEFAULT 'pending',
-                        created_at TEXT
-                    )
-                """)
-                conn.execute("""
-                    INSERT OR IGNORE INTO referral_bonus_pending
-                    (referrer_id, referred_id, due_at, status, created_at)
-                    VALUES (?, ?, ?, 'pending', ?)
+                    UPDATE users
+                    SET bonus_balance=bonus_balance+?,
+                        money_balance=money_balance+?
+                    WHERE id=?
                 """, (
-                    referrer_id, user.id,
-                    (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
-                    now_iso()
+                    REFERRAL_BONUS,
+                    REFERRAL_BONUS,
+                    referrer_id
                 ))
 
             conn.commit()
@@ -632,11 +655,19 @@ async def start(update, context):
     conn.close()
 
     await update.message.reply_text(
-        "🎉 <b>TEKIN STARS BOT</b>\n\n"
-        "Xush kelibsiz!\n\n"
-        "Kerakli bo‘limni tanlang.",
+        "🖥 <b>Asosiy menyudasiz!</b>",
         parse_mode="HTML",
         reply_markup=main_keyboard()
+    )
+
+async def homiy_menu(update, context):
+    await update.message.reply_text(
+        "🤝 <b>HOMIY</b>\n\n"
+        "📢 Homiy kanalimizga o‘tish uchun quyidagi tugmani bosing.",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🤝 HOMIY @rakhmonovrek", url="https://t.me/rakhmonovrek")]
+        ])
     )
 
 # =========================================================
@@ -653,10 +684,9 @@ async def money_work(update, context):
     await update.message.reply_text(
         "💰 <b>PUL ISHLASH</b>\n\n"
         f"🎁 Bonus pul: <b>{bonus:,.0f} so‘m</b>\n"
-        
+        f"💳 Kiritilgan pul: <b>{real:,.0f} so‘m</b>\n"
         f"👥 Referallar: <b>{refs}</b>\n\n"
-        f"🗣 1 referal = <b>+{REFERRAL_BONUS:,.0f} so‘m</b>\n"
-        "🔒 Bonus faqat pul yechishga ishlaydi.",
+        f"🗣 1 referal = <b>+{REFERRAL_BONUS:,.0f} so‘m bonus</b>",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
             [
@@ -758,7 +788,7 @@ async def numbers_menu(update, context):
     for country, price in NUMBERS.items():
         buttons.append([
             InlineKeyboardButton(
-                f"{country} — {price:,} so‘m ({NUMBER_STOCK.get(country, 0)} dona)",
+                f"{country} — {price:,} so‘m",
                 callback_data=f"number:{country}"
             )
         ])
@@ -775,15 +805,10 @@ async def number_country(update, context, country):
 
     if price is None:
         return
-    stock = NUMBER_STOCK.get(country, 0)
-    if stock <= 0:
-        await update.callback_query.answer("❌ Bu davlatda hozircha nomer qolmagan.", show_alert=True)
-        return
 
     await update.callback_query.edit_message_text(
         f"📱 <b>{country}</b>\n\n"
-        f"💰 Narx: <b>{price:,} so‘m</b>\n"
-        f"📦 Qolgan: <b>{stock} dona</b>\n\n"
+        f"💰 Narx: <b>{price:,} so‘m</b>\n\n"
         "Buyurtma berish uchun:",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup([
@@ -808,19 +833,6 @@ async def create_number_order(update, context, country):
         return
 
     conn = db()
-    stock = NUMBER_STOCK.get(country, 0)
-    if stock <= 0:
-        conn.close()
-        await update.callback_query.answer("❌ Nomer qolmagan.", show_alert=True)
-        return
-
-    cur_stock = conn.execute("""
-        UPDATE number_stock SET stock=stock-1 WHERE country=? AND stock>0
-    """, (country,))
-    if cur_stock.rowcount != 1:
-        conn.close()
-        await update.callback_query.answer("❌ Nomer qolmagan.", show_alert=True)
-        return
 
     cur = conn.execute("""
         UPDATE users
@@ -836,8 +848,6 @@ async def create_number_order(update, context, country):
     ))
 
     if cur.rowcount != 1:
-        conn.execute("UPDATE number_stock SET stock=stock+1 WHERE country=?", (country,))
-        conn.commit()
         conn.close()
 
         await update.callback_query.answer(
@@ -1061,14 +1071,21 @@ async def shop(update, context):
     )
 
 async def shop_stars(update, context):
+    buttons = []
+
+    for stars, price in STARS_PRICES.items():
+        buttons.append([
+            InlineKeyboardButton(
+                f"{stars} ⭐ — {price:,} so‘m",
+                callback_data=f"buy_stars:{stars}"
+            )
+        ])
+
     await update.callback_query.edit_message_text(
-        "⭐ <b>STARS OLISH</b>\n\n"
-        f"💰 1 ⭐ = <b>{STARS_RATE:,} so‘m</b>\n\n"
-        "Nechta Stars kerak bo‘lsa, o‘zingiz miqdorini yozasiz.",
+        "⭐ <b>STARS SOTIB OLISH</b>\n\n"
+        "Miqdorni tanlang:",
         parse_mode="HTML",
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("✍️ MIQDORNI O‘ZIM YOZAMAN", callback_data="buy_stars_custom")
-        ]])
+        reply_markup=InlineKeyboardMarkup(buttons)
     )
 
 async def shop_premium(update, context):
@@ -2224,7 +2241,23 @@ async def callbacks(update, context):
     # =====================================================
 
     if data == "check_sponsor":
-        await show_sponsor(update)
+        if not await check_sponsor(context.bot, user_id):
+            await query.answer(
+                "❌ Avval barcha homiy kanallarga obuna bo‘ling!",
+                show_alert=True
+            )
+            return
+
+        await query.edit_message_text(
+            "✅ <b>OBUNA TASDIQLANDI!</b>",
+            parse_mode="HTML"
+        )
+
+        await query.message.reply_text(
+            "🖥 <b>Asosiy menyudasiz!</b>",
+            parse_mode="HTML",
+            reply_markup=main_keyboard()
+        )
         return
 
     # =====================================================
@@ -2246,8 +2279,8 @@ async def callbacks(update, context):
 
         await query.message.reply_text(
             "📢 <b>HOMIY QO‘SHISH</b>\n\n"
-            "Kanal username yuboring:\n"
-            "<code>@kanal</code>",
+            "Kanal username yoki link yuboring:\n"
+            "<code>@kanal</code> yoki <code>https://t.me/+...</code>",
             parse_mode="HTML"
         )
         return
@@ -2513,14 +2546,6 @@ async def callbacks(update, context):
 
     if data == "shop_premium":
         await shop_premium(update, context)
-        return
-
-    if data == "buy_stars_custom":
-        context.user_data["waiting_stars_amount"] = True
-        await query.message.reply_text(
-            f"⭐ Nechta Stars olmoqchisiz?\n\n1 ⭐ = {STARS_RATE:,} so‘m\n\nMasalan: <code>100</code>",
-            parse_mode="HTML"
-        )
         return
 
     if data.startswith("buy_stars:"):
@@ -2829,53 +2854,42 @@ async def text_handler(update, context):
 
         if context.user_data.get("adding_sponsor"):
             raw = update.message.text.strip()
-            url = raw
-            if raw.startswith("https://t.me/"):
-                channel = "@" + raw.split("https://t.me/", 1)[1].strip("/").split("/")[0]
+
+            if not raw:
+                await update.message.reply_text("❌ Kanal username yoki link yuboring.")
+                return
+
+            # @username, t.me/username va private join-request/invite linklar qabul qilinadi.
+            if raw.startswith("https://t.me/") or raw.startswith("http://t.me/"):
+                url = raw.replace("http://", "https://", 1)
+                tail = url.split("t.me/", 1)[1].strip("/")
+                channel = "@" + tail if tail and not tail.startswith(("+", "joinchat/")) else url
+            elif raw.startswith("t.me/"):
+                url = "https://" + raw
+                tail = raw.split("t.me/", 1)[1].strip("/")
+                channel = "@" + tail if tail and not tail.startswith(("+", "joinchat/")) else url
             else:
                 channel = raw if raw.startswith("@") else "@" + raw
                 url = f"https://t.me/{channel.lstrip('@')}"
 
-            if not channel.startswith("@"):
-                channel = "@" + channel
-
-            try:
-                conn = db()
-
-                conn.execute("""
-                    INSERT OR IGNORE INTO sponsors(
-                        channel,
-                        url,
-                        limit_users,
-                        joined_users,
-                        active,
-                        created_at
-                    )
-                    VALUES (?, ?, 380, 0, 1, ?)
-                """, (
-                    channel,
-                    url,
-                    now_iso()
-                ))
-
-                conn.commit()
-                conn.close()
-
-                context.user_data.pop(
-                    "adding_sponsor",
-                    None
+            conn = db()
+            conn.execute("""
+                INSERT OR REPLACE INTO sponsors(
+                    channel, url, limit_users, joined_users, active, created_at
                 )
+                VALUES (?, ?, 380, 0, 1, ?)
+            """, (channel, url, now_iso()))
+            conn.commit()
+            conn.close()
 
-                await update.message.reply_text(
-                    f"✅ <b>{channel}</b> homiy qo‘shildi.\n🔗 {url}",
-                    parse_mode="HTML"
-                )
+            context.user_data.pop("adding_sponsor", None)
 
-            except Exception:
-                await update.message.reply_text(
-                    "❌ Kanal topilmadi. Username to‘g‘ri ekanini tekshiring."
-                )
-
+            await update.message.reply_text(
+                f"✅ <b>{channel}</b> homiy qo‘shildi.\n\n"
+                f"🔗 {url}\n"
+                "🎯 Limit: <b>380</b>",
+                parse_mode="HTML"
+            )
             return
 
         if context.user_data.get("sponsor_limit_channel"):
@@ -2939,29 +2953,6 @@ async def text_handler(update, context):
         and context.user_data.get("waiting_receipt")
     ):
         await receive_receipt(update, context)
-        return
-
-    # CUSTOM STARS MIQDORI
-    if context.user_data.get("waiting_stars_amount"):
-        try:
-            stars = int(update.message.text.replace(" ", "").replace(",", ""))
-        except Exception:
-            await update.message.reply_text("❌ Faqat butun son kiriting.")
-            return
-        if stars < 1 or stars > 1000000:
-            await update.message.reply_text("❌ Stars miqdori 1 dan 1 000 000 gacha bo‘lsin.")
-            return
-        price = stars * STARS_RATE
-        context.user_data.pop("waiting_stars_amount", None)
-        context.user_data["pending_order"] = {"category":"stars", "item":f"{stars} Stars", "price":price}
-        await update.message.reply_text(
-            f"⭐ <b>{stars:,} Stars</b>\n💰 Narxi: <b>{price:,} so‘m</b>\n\nKim uchun?",
-            parse_mode="HTML",
-            reply_markup=InlineKeyboardMarkup([[
-                InlineKeyboardButton("👤 O‘ZIMGA", callback_data="target:self"),
-                InlineKeyboardButton("👥 BOSHQA USERGA", callback_data="target:other")
-            ]])
-        )
         return
 
     # PAYMENT AMOUNT
@@ -3111,6 +3102,12 @@ async def text_handler(update, context):
     if text == "💰 PUL ISHLASH":
         await money_work(update, context)
 
+    elif text == "⭐ STARS":
+        await stars_work(update, context)
+
+    elif text == "💎 PREMIUM":
+        await premium_work(update, context)
+
     elif text == "📱 NOMER OLISH":
         await numbers_menu(update, context)
 
@@ -3126,8 +3123,8 @@ async def text_handler(update, context):
     elif text == "👤 MENING HISOBIM":
         await my_account(update, context)
 
-    elif text == "📢 HOMIY":
-        await show_sponsor(update)
+    elif text == "🤝 HOMIY":
+        await homiy_menu(update, context)
 
 # =========================================================
 # ERROR
@@ -3151,13 +3148,9 @@ def main():
 
     init_db()
 
-    async def post_init(app):
-        app.create_task(referral_bonus_loop())
-
     application = (
         Application.builder()
         .token(BOT_TOKEN)
-        .post_init(post_init)
         .build()
     )
 
@@ -3185,7 +3178,7 @@ def main():
     )
 
     logger.info(
-        "TEKIN STARS BOT ishga tushdi."
+        "ARZON SMM BOT ishga tushdi."
     )
 
     application.run_polling(
