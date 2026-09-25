@@ -33,14 +33,14 @@ DB_FILE = "zerikdim.db"
 PAYMENT_CARD = "5614681008971867"
 PAYMENT_OWNER = "RAKHMONOVA/O"
 
-DEFAULT_SPONSOR_CHANNEL = "https://t.me/+LGrk3ThmLdEzMDAy"
-DEFAULT_SPONSOR_URL = "https://t.me/+LGrk3ThmLdEzMDAy"
-DEFAULT_SPONSOR_LIMIT = 100
+DEFAULT_SPONSOR_CHANNEL = "@premyumstarstekin"
+DEFAULT_SPONSOR_URL = "https://t.me/premyumstarstekin"
+DEFAULT_SPONSOR_LIMIT = 10000
 
 REFERRAL_STARS = 5.0
 REFERRAL_BONUS = 1200.0
 MIN_WITHDRAW = 10000
-MIN_TOPUP = 1000
+MIN_TOPUP = 2500
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -53,14 +53,14 @@ logger = logging.getLogger(__name__)
 # =========================================================
 
 NUMBERS = {
-    "🇧🇩 Bangladesh": 6000,
-    "🇺🇸 USA": 6000,
+    "🇧🇩 Bangladesh": 5800,
+    "🇺🇸 USA": 7000,
     "🇮🇳 India": 6000,
     "🇮🇩 Indonesia": 6000,
     "🇳🇬 Nigeria": 6000,
     "🇪🇹 Ethiopia": 6000,
-    "🇲🇲 Myanmar": 6000,
-    "🇺🇿 Uzbekistan": 12000,
+    "🇷🇺 rusiya": 24000,
+    "🇺🇿 Uzbekistan": 13000,
 }
 
 # =========================================================
