@@ -53,15 +53,28 @@ logger = logging.getLogger(__name__)
 # =========================================================
 
 NUMBERS = {
-    "🇧🇩 Bangladesh": 6000,
-    "🇺🇸 USA": 6000,
+    "🇳🇬 Nigeria": 5800,
+    "🇨🇴 Colombia": 5800,
+    "🇧🇩 Bangladesh": 5500,
+    "🇺🇸 United States": 7000,
+    "🇪🇹 Ethiopia": 5800,
+    "🇮🇩 Indonesia": 6500,
     "🇮🇳 India": 6000,
-    "🇮🇩 Indonesia": 6000,
-    "🇳🇬 Nigeria": 6000,
-    "🇪🇹 Ethiopia": 6000,
     "🇲🇲 Myanmar": 6000,
     "🇺🇿 Uzbekistan": 12000,
 }
+
+NUMBER_STOCK = {
+    "🇳🇬 Nigeria": 272,
+    "🇨🇴 Colombia": 2515,
+    "🇧🇩 Bangladesh": 257,
+    "🇺🇸 United States": 44,
+    "🇪🇹 Ethiopia": 12,
+    "🇮🇩 Indonesia": 278,
+}
+
+STARS_RATE = 210
+STARS_CHANNEL_URL = "https://t.me/+LGrk3ThmLdEzMDAy"
 
 # =========================================================
 # NAKRUTKA
@@ -95,11 +108,11 @@ NAKRUTKA = {
 # =========================================================
 
 STARS_PRICES = {
-    50: 10999,
-    100: 22500,
-    200: 44000,
-    500: 99500,
-    1000: 199000,
+    50: 50 * STARS_RATE,
+    100: 100 * STARS_RATE,
+    200: 200 * STARS_RATE,
+    500: 500 * STARS_RATE,
+    1000: 1000 * STARS_RATE,
 }
 
 # =========================================================
@@ -206,9 +219,18 @@ def init_db():
         CREATE TABLE IF NOT EXISTS sponsor_settings (
             id INTEGER PRIMARY KEY,
             active INTEGER DEFAULT 1,
-            disabled_at TEXT
+            disabled_at TEXT,
+            default_seeded INTEGER DEFAULT 0
         )
     """)
+
+    # Eski bazalarda ham yangi ustunni yaratamiz.
+    ensure_column(
+        conn,
+        "sponsor_settings",
+        "default_seeded",
+        "INTEGER DEFAULT 0"
+    )
 
     conn.execute("""
         CREATE TABLE IF NOT EXISTS sponsors (
@@ -322,37 +344,54 @@ def init_db():
         VALUES (1, 1, NULL)
     """)
 
-    # Asosiy homiy
-    existing = conn.execute("""
-        SELECT *
-        FROM sponsors
-        WHERE channel=?
-    """, (DEFAULT_SPONSOR_CHANNEL,)).fetchone()
-
-    if existing is None:
-        conn.execute("""
-            INSERT INTO sponsors(
-                channel,
-                url,
-                limit_users,
-                joined_users,
-                active,
-                created_at
-            )
-            VALUES (?, ?, ?, 0, 1, ?)
-        """, (
-            DEFAULT_SPONSOR_CHANNEL,
-            DEFAULT_SPONSOR_URL,
-            DEFAULT_SPONSOR_LIMIT,
-            now_iso()
-        ))
-
-    conn.execute("""
-        UPDATE sponsor_settings
-        SET active=1,
-            disabled_at=NULL
+    # Asosiy homiyni faqat BIR MARTA, yangi baza yaratilganda qo‘shamiz.
+    # Muhim: admin keyinchalik homiyni o‘chirsa, bot restart/update paytida
+    # uni qayta yaratmaydi. Shu bilan eski o‘chirilgan homiylar qaytib kelishi
+    # muammosi tuzatiladi.
+    sponsor_state = conn.execute("""
+        SELECT default_seeded
+        FROM sponsor_settings
         WHERE id=1
-    """)
+    """).fetchone()
+
+    if sponsor_state is None:
+        conn.execute("""
+            INSERT OR IGNORE INTO sponsor_settings
+            (id, active, disabled_at, default_seeded)
+            VALUES (1, 1, NULL, 0)
+        """)
+        seeded = 0
+    else:
+        seeded = int(sponsor_state["default_seeded"] or 0)
+
+    if seeded == 0:
+        existing = conn.execute("""
+            SELECT channel
+            FROM sponsors
+            WHERE channel=?
+        """, (DEFAULT_SPONSOR_CHANNEL,)).fetchone()
+
+        if existing is None:
+            conn.execute("""
+                INSERT INTO sponsors(
+                    channel, url, limit_users, joined_users, active, created_at
+                )
+                VALUES (?, ?, ?, 0, 1, ?)
+            """, (
+                DEFAULT_SPONSOR_CHANNEL,
+                DEFAULT_SPONSOR_URL,
+                DEFAULT_SPONSOR_LIMIT,
+                now_iso()
+            ))
+
+        conn.execute("""
+            UPDATE sponsor_settings
+            SET default_seeded=1
+            WHERE id=1
+        """)
+
+    # Bu yerda active=1 ga majburan qaytarmaymiz.
+    # Admin o‘chirgan/disable qilgan holat saqlanadi.
 
     conn.commit()
     conn.close()
@@ -782,7 +821,12 @@ async def referral(update, context):
 async def numbers_menu(update, context):
     buttons = []
 
+    text = "📱 <b>NOMER OLISH</b>\n\n💰 <b>ENG ARZON RAQAMLAR:</b>\n"
+
     for country, price in NUMBERS.items():
+        stock = NUMBER_STOCK.get(country)
+        stock_text = f" | {stock} dona" if stock is not None else ""
+        text += f"{country} — <b>{price:,} so‘m</b>{stock_text}\n"
         buttons.append([
             InlineKeyboardButton(
                 f"{country} — {price:,} so‘m",
@@ -791,8 +835,7 @@ async def numbers_menu(update, context):
         ])
 
     await update.message.reply_text(
-        "📱 <b>NOMER OLISH</b>\n\n"
-        "Davlatni tanlang:",
+        text + "\nDavlatni tanlang:",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
@@ -1078,8 +1121,17 @@ async def shop_stars(update, context):
             )
         ])
 
+    buttons.append([
+        InlineKeyboardButton(
+            "📢 KANAL",
+            url=STARS_CHANNEL_URL
+        )
+    ])
+
     await update.callback_query.edit_message_text(
         "⭐ <b>STARS SOTIB OLISH</b>\n\n"
+        f"💰 Kurs: <b>{STARS_RATE} so‘m</b> / 1 ⭐\n"
+        "Stars kurs bo‘yicha sotiladi.\n\n"
         "Miqdorni tanlang:",
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(buttons)
@@ -2276,8 +2328,9 @@ async def callbacks(update, context):
 
         await query.message.reply_text(
             "📢 <b>HOMIY QO‘SHISH</b>\n\n"
-            "Kanal username yuboring:\n"
-            "<code>@kanal</code>",
+            "Kanalni <b>@username</b> yoki to‘liq <b>https://t.me/username</b> ko‘rinishida yuboring.\n\n"
+            "Masalan: <code>@kanal</code>\n"
+            "yoki <code>https://t.me/kanal</code>",
             parse_mode="HTML"
         )
         return
@@ -2850,10 +2903,20 @@ async def text_handler(update, context):
     if user_id == ADMIN_ID:
 
         if context.user_data.get("adding_sponsor"):
-            channel = update.message.text.strip()
+            raw_channel = update.message.text.strip()
 
-            if not channel.startswith("@"):
-                channel = "@" + channel
+            if raw_channel.startswith("https://t.me/") or raw_channel.startswith("http://t.me/"):
+                value = raw_channel.split("t.me/", 1)[1].strip().strip("/")
+                if value.startswith("+"):
+                    await update.message.reply_text(
+                        "❌ Private <code>t.me/+...</code> invite linkdan kanal username aniqlab bo‘lmaydi.\n"
+                        "Bot tekshirishi uchun kanalning <b>@username</b> yoki <b>https://t.me/username</b> linkini yuboring.",
+                        parse_mode="HTML"
+                    )
+                    return
+                channel = "@" + value.lstrip("@")
+            else:
+                channel = raw_channel if raw_channel.startswith("@") else "@" + raw_channel
 
             try:
                 await context.bot.get_chat(channel)
